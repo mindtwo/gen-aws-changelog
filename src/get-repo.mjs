@@ -19,7 +19,7 @@ export function parseReponame(orgRepo) {
     };
 }
 
-export function getGithubFile(orgRepo, path) {
+export function getGithubFile(orgRepo, path, printError = false) {
     const { organization, repository } =
         typeof orgRepo === 'string' ? parseReponame(orgRepo) : orgRepo;
 
@@ -42,10 +42,12 @@ export function getGithubFile(orgRepo, path) {
         // decode base64 in JS
         return Buffer.from(contentBase64.trim(), 'base64').toString('utf8');
     } catch (error) {
-        consola.error(
-            `Error fetching file ${path} from repository ${orgRepo}:`,
-            error.message
-        );
+        if (printError) {
+            consola.error(
+                `Error fetching file ${path} from repository ${orgRepo}:`,
+                error.message
+            );
+        }
         return null;
     }
 }
