@@ -1,0 +1,43 @@
+{
+    "name": "@mindtwo/gen-aws-changelog",
+    "version": "1.0.0",
+    "description": "Generate changelogs by comparing commits between AWS CodePipeline stages",
+    "type": "module",
+    "bin": {
+        "gen-aws-changelog": "./dist/index.mjs"
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "node build.mjs",
+        "dev": "node ./cli/main.mjs",
+        "prepublishOnly": "npm run build"
+    },
+    "keywords": [
+        "aws",
+        "codepipeline",
+        "changelog",
+        "git",
+        "github",
+        "deployment",
+        "release",
+        "cli"
+    ],
+    "author": "mindtwo",
+    "license": "MIT",
+    "publishConfig": {
+        "access": "public"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "devDependencies": {
+        "@aws-sdk/client-codepipeline": "^3.933.0",
+        "citty": "^0.1.6",
+        "consola": "^3.4.2",
+        "rolldown": "^1.0.0-beta.50",
+        "zod": "^4.1.12"
+    }
+}
