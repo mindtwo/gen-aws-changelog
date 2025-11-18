@@ -1,6 +1,6 @@
 {
     "name": "@mindtwo/gen-aws-changelog",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Generate changelogs by comparing commits between AWS CodePipeline stages",
     "type": "module",
     "bin": {
