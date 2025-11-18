@@ -29,12 +29,12 @@ Before using this tool, ensure you have:
    - `codepipeline:GetPipelineState`
    - `codepipeline:GetPipelineExecution`
 
-3. **Node.js** (version 14 or higher)
+3. **Node.js** (version 20 or higher)
 
 ## Installation
 
 ```bash
-npm install
+npm install -g @mindtwo/gen-aws-changelog
 ```
 
 ## Usage
@@ -42,13 +42,13 @@ npm install
 ### Basic Command
 
 ```bash
-node cli/main.mjs <org/repo> --pipeline <pipeline-name> --fromStage <stage1> --toStage <stage2>
+gen-aws-changelog <org/repo> --pipeline <pipeline-name> --fromStage <stage1> --toStage <stage2>
 ```
 
 ### Example
 
 ```bash
-node cli/main.mjs myorg/myrepo \
+gen-aws-changelog myorg/myrepo \
   --pipeline my-production-pipeline \
   --fromStage DeployStaging \
   --toStage DeployProduction \
@@ -122,10 +122,10 @@ Once you've added `.aws-changelog.json` to your repository, you can run:
 
 ```bash
 # Uses configuration from .aws-changelog.json
-node cli/main.mjs myorg/myrepo
+gen-aws-changelog myorg/myrepo
 
 # Override specific options
-node cli/main.mjs myorg/myrepo --toStage DeployCanary
+gen-aws-changelog myorg/myrepo --toStage DeployCanary
 ```
 
 ### Bypass Repository Configuration
@@ -133,7 +133,7 @@ node cli/main.mjs myorg/myrepo --toStage DeployCanary
 Use `--noGit` to ignore the repository configuration file:
 
 ```bash
-node cli/main.mjs myorg/myrepo --noGit \
+gen-aws-changelog myorg/myrepo --noGit \
   --pipeline different-pipeline \
   --fromStage Stage1 \
   --toStage Stage2
@@ -147,13 +147,11 @@ node cli/main.mjs myorg/myrepo --noGit \
 4. **Compare Commits**: Uses `gh` CLI to compare commits between the two SHAs
 5. **Generate Changelog**: Formats and displays the commit messages
 
-## NPM Scripts
-
-The `package.json` includes convenience scripts:
+## Scripts
 
 ```bash
 # Generate changelog
-npm run changelog:generate -- myorg/myrepo --pipeline my-pipeline --fromStage Stage1 --toStage Stage2
+gen-aws-changelog myorg/myrepo --pipeline my-pipeline --fromStage Stage1 --toStage Stage2
 ```
 
 ## Error Handling
