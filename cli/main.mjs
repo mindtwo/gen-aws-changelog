@@ -3,6 +3,7 @@ import { compareCommits, parseReponame } from '../src/get-repo.mjs';
 import { getAwsPipelineStages } from '../src/pipeline-commits.mjs';
 import consola from 'consola';
 import { parse } from '../src/config.mjs';
+import { checkPrerequisites } from '../src/dependencies.mjs';
 
 const main = defineCommand({
     meta: {
@@ -59,6 +60,10 @@ const main = defineCommand({
             consola.level = 3; // Error
         }
 
+        if (!checkPrerequisites()) {
+            process.exit(1);
+        }
+
         const repo = parseReponame(args.repo);
         const config = parse(args);
 
@@ -67,34 +72,34 @@ const main = defineCommand({
             process.exit(1);
         }
 
-        // Get the changelog via aws pipeline
-        const { fromStage, toStage } =
-            (await getAwsPipelineStages(config)) || {};
+        // // Get the changelog via aws pipeline
+        // const { fromStage, toStage } =
+        //     (await getAwsPipelineStages(config)) || {};
 
-        if (!fromStage || !toStage) {
-            consola.error('No stage information found in the pipeline.');
-            process.exit(1);
-        }
+        // if (!fromStage || !toStage) {
+        //     consola.error('No stage information found in the pipeline.');
+        //     process.exit(1);
+        // }
 
-        // TODO: return a list of commits
-        const changelog = compareCommits(
-            repo,
-            toStage.revisionId,
-            fromStage.revisionId
-        );
+        // // TODO: return a list of commits
+        // const changelog = compareCommits(
+        //     repo,
+        //     toStage.revisionId,
+        //     fromStage.revisionId
+        // );
 
-        if (!changelog || changelog.length === 0) {
-            consola.warn('No changes found between the specified stages.');
-            return;
-        }
+        // if (!changelog || changelog.length === 0) {
+        //     consola.warn('No changes found between the specified stages.');
+        //     return;
+        // }
 
-        const fromSha = fromStage.revisionId.slice(0, 7);
-        const toSha = toStage.revisionId.slice(0, 7);
+        // const fromSha = fromStage.revisionId.slice(0, 7);
+        // const toSha = toStage.revisionId.slice(0, 7);
 
-        const header = `### Changes for release ${fromStage.stageName} (${fromSha}) to ${toStage.stageName} (${toSha}):`;
+        // const header = `### Changes for release ${fromStage.stageName} (${fromSha}) to ${toStage.stageName} (${toSha}):`;
 
-        // Print the changelog
-        console.log(`${header}\n\n${changelog}\n`);
+        // // Print the changelog
+        // console.log(`${header}\n\n${changelog}\n`);
     },
 });
 

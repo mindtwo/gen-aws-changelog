@@ -1,4 +1,4 @@
-import { pipe, z } from 'zod';
+import { z } from 'zod';
 import { consola } from 'consola';
 import { getGithubFile } from './get-repo.mjs';
 
@@ -25,6 +25,7 @@ function getGithubConfig(repo) {
         consola.warn(
             `No .aws-changelog.json found in repository ${repo}. Using default configuration.`
         );
+
         return {};
     }
 

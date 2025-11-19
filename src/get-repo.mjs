@@ -26,21 +26,20 @@ export function getGithubFile(orgRepo, path, printError = false) {
     // Use gh CLI to get the file content in base64
     // gh api repos/{organization}/{repository}/contents/{path} -f ref={ref} --jq '.content'
     try {
-        const contentBase64 = execFileSync(
+        const response = execFileSync(
             'gh',
-            [
-                'api',
-                `repos/${organization}/${repository}/contents/${path}`,
-                '--jq',
-                '.content',
-                '-q',
-                '.content',
-            ],
+            ['api', `repos/${organization}/${repository}/contents/${path}`],
             { encoding: 'utf8' }
         );
 
+        const data = JSON.parse(response);
+
+        if (!data.content) {
+            return null;
+        }
+
         // decode base64 in JS
-        return Buffer.from(contentBase64.trim(), 'base64').toString('utf8');
+        return Buffer.from(response.content.trim(), 'base64').toString('utf8');
     } catch (error) {
         if (printError) {
             consola.error(
