@@ -69,7 +69,7 @@ This will output:
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `repo` | positional | Yes | - | Repository name with organization (e.g., `org/repo`) |
+| `repo` | positional | Yes | - | Repository name with organization/owner (e.g., `owner/repo`) |
 | `--pipeline` | string | No* | - | AWS CodePipeline name |
 | `--fromStage` | string | No* | - | Starting stage of the pipeline (e.g., `DeployStaging`) |
 | `--toStage` | string | No* | - | Ending stage of the pipeline (e.g., `DeployProduction`) |

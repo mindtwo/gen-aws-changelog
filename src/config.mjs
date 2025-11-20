@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { consola } from 'consola';
-import { getGithubFile } from './get-repo.mjs';
+import { getGithubFile } from './github-cli.mjs';
 
 // Schema for validating GitHub configuration
 const GithubConfigSchema = z.object({
