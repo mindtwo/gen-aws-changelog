@@ -58,6 +58,8 @@ export function getGithubFile(orgRepo, path) {
         return null;
     }
 
+    const contentBase64 = data.content;
+
     return Buffer.from(contentBase64.trim(), 'base64').toString('utf8');
 }
 

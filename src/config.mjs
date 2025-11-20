@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { consola } from 'consola';
+import { defu } from 'defu';
 import { getGithubFile } from './github-cli.mjs';
 
 // Schema for validating GitHub configuration
@@ -31,6 +32,7 @@ function getGithubConfig(repo) {
 
     try {
         const parsedConfig = JSON.parse(content);
+
         const validatedConfig = GithubConfigSchema.parse(parsedConfig);
         return validatedConfig;
     } catch (error) {
@@ -53,7 +55,7 @@ export function parse(args) {
 
     const githubConfig = !args.noGit ? getGithubConfig(args.repo) : {};
 
-    const config = Object.assign(
+    const config = defu(
         {
             pipeline: null,
             region: null,

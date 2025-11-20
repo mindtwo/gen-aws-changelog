@@ -39,5 +39,8 @@
         "consola": "^3.4.2",
         "rolldown": "^1.0.0-beta.50",
         "zod": "^4.1.12"
+    },
+    "dependencies": {
+        "defu": "^6.1.4"
     }
 }
