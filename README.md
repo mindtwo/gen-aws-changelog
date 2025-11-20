@@ -65,6 +65,23 @@ This will output:
 - cde3456 Update dependencies
 ```
 
+### Creating a GitHub Release
+
+To automatically create a GitHub release with the changelog, add the `--tag` flag:
+
+```bash
+gen-aws-changelog myorg/myrepo \
+  --pipeline my-production-pipeline \
+  --fromStage DeployStaging \
+  --toStage DeployProduction \
+  --tag
+```
+
+This will:
+- Create a GitHub release with a tag named `release-DD-MM-YYYY` (current date)
+- Use the changelog as the release description
+- Output the release URL
+
 ## Command-Line Options
 
 | Option | Type | Required | Default | Description |
@@ -77,6 +94,7 @@ This will output:
 | `--verbose` | boolean | No | `false` | Enable verbose logging |
 | `--quiet` | boolean | No | `false` | Only show errors |
 | `--noGit` | boolean | No | `false` | Don't fetch repository configuration from GitHub |
+| `--tag` | boolean | No | `false` | Create a GitHub release with the changelog as description |
 
 \* Required unless configured in repository (see Git Repository Configuration below)
 
