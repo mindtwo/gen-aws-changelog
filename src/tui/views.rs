@@ -6,12 +6,17 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
+    // Status area grows to fit the message: 1 line for plain help, up to
+    // 10 lines (bordered, wrapped) for multi-line errors so the full
+    // assume-role / git diagnostic is readable inline.
+    let help_height = status_height(state, f.area().width);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // tabs
-            Constraint::Min(0),    // body
-            Constraint::Length(1), // help
+            Constraint::Length(3),           // tabs
+            Constraint::Min(0),              // body
+            Constraint::Length(help_height), // help / status
         ])
         .split(f.area());
 
@@ -22,6 +27,21 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         Tab::Accounts => draw_accounts(f, chunks[1], state),
     }
     draw_help(f, chunks[2], state);
+}
+
+fn status_height(state: &AppState, width: u16) -> u16 {
+    let Some(status) = &state.status else {
+        return 1;
+    };
+    let inner = width.saturating_sub(2).max(1) as usize; // borders
+    let mut lines = 0u16;
+    for line in status.lines() {
+        let len = line.chars().count().max(1);
+        let wrapped = len.div_ceil(inner);
+        lines = lines.saturating_add(wrapped as u16);
+    }
+    // +2 for borders, +1 for the "(c: clear)" hint row.
+    lines.saturating_add(3).clamp(3, 10)
 }
 
 fn draw_tabs(f: &mut Frame, area: Rect, state: &AppState) {
@@ -40,18 +60,27 @@ fn draw_tabs(f: &mut Frame, area: Rect, state: &AppState) {
 
 fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     // If there's a status message (e.g. "assumed into prod-app-teach"),
-    // show that instead of the static help. It's the most actionable
-    // piece of info right after an action.
+    // render it inside a bordered, wrapped panel so the full text is
+    // visible — assume-role errors run multiple lines.
     if let Some(status) = &state.status {
         let is_error = status_is_error(status);
         let color = if is_error { Color::Red } else { Color::Green };
+        let title = if is_error { " Error " } else { " Status " };
+        let mut lines: Vec<Line> = status
+            .lines()
+            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(color))))
+            .collect();
+        lines.push(Line::from(vec![
+            Span::raw(""),
+            Span::styled("c", Style::default().fg(Color::Yellow)),
+            Span::raw(": clear  "),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::raw(": quit"),
+        ]));
         f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(status.clone(), Style::default().fg(color)),
-                Span::raw("  "),
-                Span::styled("(c", Style::default().fg(Color::Yellow)),
-                Span::raw(": clear)"),
-            ])),
+            Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title(title))
+                .wrap(Wrap { trim: false }),
             area,
         );
         return;

@@ -1,19 +1,26 @@
 //! Wrapper around the user's `assume-role` script.
 //!
 //! Invariants we rely on (from inspecting the script):
+//!
+//! - The script defines an `assume-role` shell function. When *sourced*,
+//!   its bottom branch is a noop and only the function is registered;
+//!   when *executed* directly, it sets `set -eo pipefail` and immediately
+//!   invokes the function — but the function's first command is
+//!   `read -r -d '' HELP <<EOF` which always returns 1, killing the
+//!   script under `set -e` before anything user-visible happens.
+//!   So we always *source* the script via `bash -c` and call the
+//!   function ourselves, matching how an interactive user runs it.
 //! - `OUTPUT_TO_EVAL=true` suppresses interactive prompts and emits
 //!   `export KEY="VALUE";` lines on stdout for `eval` consumers.
 //! - Diagnostic messages get wrapped as `echo "...";` lines on **stdout**
 //!   too (so a shell `eval` prints them).
-//! - The script never assigns `mfa_token_input` from a positional arg
-//!   (the usage comment is aspirational). It's read straight from the
-//!   environment — passing it as `mfa_token_input=<token>` works.
+//! - `mfa_token_input` is never assigned from a positional arg despite
+//!   what the script's usage comment says. It's read straight from the
+//!   environment, so we pass it as `mfa_token_input=<token>`.
 //!
-//! We capture both stdout and stderr so failures from `aws` / `jq` /
-//! `set -e` deaths are visible. The script's echo-wrapped messages and
-//! anything it writes to stderr get printed to our stderr (so users see
-//! them in the TUI suspend window or CLI eval pipeline) and folded into
-//! the error message when the script fails.
+//! We capture both stdout and stderr. The function returns 0 even on
+//! internal failure (its `return` paths don't set an error status), so
+//! success is determined by "did we get any `export` lines back?".
 
 use crate::error::Result;
 use dialoguer::{theme::ColorfulTheme, Password};
@@ -72,20 +79,27 @@ pub fn run(account: &str, mfa_token: Option<&str>) -> Result<HashMap<String, Str
         );
     }
 
-    let mut cmd = Command::new(&binary);
-    cmd.env("OUTPUT_TO_EVAL", "true")
+    // Source the script and invoke the function — see module docs for why
+    // we can't execute the script directly.
+    let bash_script = format!(
+        r#"source "{}"; assume-role "$1"; exit $?"#,
+        binary.to_string_lossy().replace('"', r#"\""#),
+    );
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c")
+        .arg(&bash_script)
+        .arg("aws-utils") // $0 placeholder
         .arg(account)
+        .env("OUTPUT_TO_EVAL", "true")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(token) = mfa_token {
-        // The script reads this from the environment, not a positional
-        // arg (despite what its usage comment says).
         cmd.env("mfa_token_input", token);
     }
     let output = cmd
         .output()
-        .map_err(|e| anyhow::anyhow!("spawn {}: {e}", binary.display()))?;
+        .map_err(|e| anyhow::anyhow!("spawn bash for assume-role: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -102,34 +116,60 @@ pub fn run(account: &str, mfa_token: Option<&str>) -> Result<HashMap<String, Str
         eprint!("{stderr}");
     }
 
-    if !output.status.success() {
-        anyhow::bail!(
-            "assume-role exited with {}{}",
-            output.status,
-            format_diagnostics(&parsed.messages, &stderr),
-        );
-    }
-    if parsed.exports.is_empty() {
-        anyhow::bail!(
-            "assume-role returned no credentials{}",
-            format_diagnostics(&parsed.messages, &stderr),
-        );
+    if !output.status.success() || parsed.exports.is_empty() {
+        let log_path = dump_debug_log(account, &stdout, &stderr, &output.status);
+        let log_hint = log_path
+            .as_ref()
+            .map(|p| format!("\n  (full output: {})", p.display()))
+            .unwrap_or_default();
+        if !output.status.success() {
+            anyhow::bail!(
+                "assume-role exited with {}{}{}",
+                output.status,
+                format_diagnostics(&parsed.messages, &stderr),
+                log_hint,
+            );
+        } else {
+            anyhow::bail!(
+                "assume-role returned no credentials{}{}",
+                format_diagnostics(&parsed.messages, &stderr),
+                log_hint,
+            );
+        }
     }
     Ok(parsed.exports)
+}
+
+/// Write the raw stdout + stderr from the failing run to a debug file,
+/// so the user can always read the unredacted output even when the TUI
+/// truncates the inline error. Best-effort: returns `None` if the
+/// destination isn't writable.
+fn dump_debug_log(
+    account: &str,
+    stdout: &str,
+    stderr: &str,
+    status: &std::process::ExitStatus,
+) -> Option<std::path::PathBuf> {
+    let dir = dirs::cache_dir()?.join("aws-utils");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("assume-role-last.log");
+    let body = format!(
+        "account: {account}\nexit: {status}\n\n=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}",
+    );
+    std::fs::write(&path, body).ok()?;
+    Some(path)
 }
 
 fn format_diagnostics(messages: &[String], stderr: &str) -> String {
     let mut parts: Vec<String> = messages.to_vec();
     let stderr_trimmed = stderr.trim();
     if !stderr_trimmed.is_empty() {
-        // Collapse multi-line stderr into a single inline string for
-        // the error display in the TUI status bar.
-        parts.push(stderr_trimmed.lines().collect::<Vec<_>>().join(" / "));
+        parts.extend(stderr_trimmed.lines().map(|l| l.trim().to_string()));
     }
     if parts.is_empty() {
         String::new()
     } else {
-        format!(": {}", parts.join(" | "))
+        format!("\n  {}", parts.join("\n  "))
     }
 }
 
@@ -273,15 +313,15 @@ export AWS_ACCESS_KEY_ID="AKIA";
         assert_eq!(format_diagnostics(&[], ""), "");
         assert_eq!(
             format_diagnostics(&["one".into(), "two".into()], ""),
-            ": one | two"
+            "\n  one\n  two"
         );
         assert_eq!(
             format_diagnostics(&[], "  An error\noccurred  "),
-            ": An error / occurred"
+            "\n  An error\n  occurred"
         );
         assert_eq!(
             format_diagnostics(&["echo msg".into()], "stderr line"),
-            ": echo msg | stderr line"
+            "\n  echo msg\n  stderr line"
         );
     }
 }
