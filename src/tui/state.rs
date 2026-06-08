@@ -84,6 +84,9 @@ pub struct AppState {
     pub recipes_list: ListState,
     pub accounts: Vec<Account>,
     pub accounts_list: ListState,
+    /// One-line status message shown in the help bar after actions
+    /// (recipe create, account assume). Cleared on the next action.
+    pub status: Option<String>,
 }
 
 impl AppState {
@@ -113,7 +116,23 @@ impl AppState {
             recipes_list,
             accounts,
             accounts_list,
+            status: None,
         }
+    }
+
+    /// Currently-assumed account name, taken from `AWS_ACCOUNT_NAME` which
+    /// the assume-role script exports.
+    pub fn current_account(&self) -> Option<String> {
+        std::env::var("AWS_ACCOUNT_NAME")
+            .ok()
+            .filter(|s| !s.is_empty())
+    }
+
+    pub fn selected_account_name(&self) -> Option<&str> {
+        self.accounts_list
+            .selected()
+            .and_then(|i| self.accounts.get(i))
+            .map(|a| a.name.as_str())
     }
 
     pub fn next_tab(&mut self) {

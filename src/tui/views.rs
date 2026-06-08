@@ -39,15 +39,38 @@ fn draw_tabs(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
+    // If there's a status message (e.g. "assumed into prod-app-teach"),
+    // show that instead of the static help. It's the most actionable
+    // piece of info right after an action.
+    if let Some(status) = &state.status {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                status.clone(),
+                Style::default().fg(Color::Green),
+            ))),
+            area,
+        );
+        return;
+    }
     let mut spans = vec![
         Span::styled("Tab", Style::default().fg(Color::Yellow)),
         Span::raw(": switch  "),
         Span::styled("j/k", Style::default().fg(Color::Yellow)),
         Span::raw(": nav  "),
     ];
-    if matches!(state.tab, Tab::Projects) {
-        spans.push(Span::styled("r", Style::default().fg(Color::Yellow)));
-        spans.push(Span::raw(": refresh AWS  "));
+    match state.tab {
+        Tab::Projects => {
+            spans.push(Span::styled("r", Style::default().fg(Color::Yellow)));
+            spans.push(Span::raw(": refresh AWS  "));
+        }
+        Tab::Recipes => {
+            spans.push(Span::styled("n", Style::default().fg(Color::Yellow)));
+            spans.push(Span::raw(": new recipe  "));
+        }
+        Tab::Accounts => {
+            spans.push(Span::styled("l/Enter", Style::default().fg(Color::Yellow)));
+            spans.push(Span::raw(": assume role  "));
+        }
     }
     spans.push(Span::styled("q", Style::default().fg(Color::Yellow)));
     spans.push(Span::raw(": quit"));
@@ -256,16 +279,54 @@ fn draw_recipes(f: &mut Frame, area: Rect, state: &mut AppState) {
 }
 
 fn draw_accounts(f: &mut Frame, area: Rect, state: &mut AppState) {
+    // Banner showing the currently-assumed account at the top, then the
+    // selectable list below.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let banner_text = match state.current_account() {
+        Some(name) => Line::from(vec![
+            Span::raw("current: "),
+            Span::styled(
+                name,
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        None => Line::from(Span::styled(
+            "no active session (press l/Enter to assume a role)",
+            Style::default().fg(Color::DarkGray),
+        )),
+    };
+    let banner = Paragraph::new(banner_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Active session"),
+    );
+    f.render_widget(banner, chunks[0]);
+
+    let current = state.current_account();
     let items: Vec<ListItem> = state
         .accounts
         .iter()
         .map(|a| {
-            let label = if a.description.is_empty() {
-                a.name.clone()
-            } else {
-                format!("{}  — {}", a.name, a.description)
-            };
-            ListItem::new(label)
+            let mut spans = vec![Span::raw(a.name.clone())];
+            if current.as_deref() == Some(a.name.as_str()) {
+                spans.push(Span::styled(
+                    "  (active)",
+                    Style::default().fg(Color::Green),
+                ));
+            }
+            if !a.description.is_empty() {
+                spans.push(Span::styled(
+                    format!("  — {}", a.description),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            ListItem::new(Line::from(spans))
         })
         .collect();
     let list = List::new(items)
@@ -280,7 +341,7 @@ fn draw_accounts(f: &mut Frame, area: Rect, state: &mut AppState) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸ ");
-    f.render_stateful_widget(list, area, &mut state.accounts_list);
+    f.render_stateful_widget(list, chunks[1], &mut state.accounts_list);
 }
 
 fn short(sha: &str) -> String {

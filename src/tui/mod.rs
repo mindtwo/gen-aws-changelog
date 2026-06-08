@@ -1,21 +1,28 @@
-//! Read-only TUI browser. Three tabs:
+//! Read-only-ish TUI browser. Three tabs:
 //!
-//! - **Projects**: list registered projects, show resolved config, optional
-//!   AWS stage state refresh (`r`) that fetches CodePipeline state in the
-//!   background.
-//! - **Recipes**: list recipes and their step order.
-//! - **Accounts**: list pre-configured AWS account names.
+//! - **Projects**: list registered projects, show resolved config. Press `r`
+//!   to refresh CodePipeline stage state for the selected project (async).
+//! - **Recipes**: browse recipes; press `n` to create a new one.
+//! - **Accounts**: list pre-configured accounts. Press `l` (or Enter) to
+//!   assume-role into the selected account — the TUI suspends raw mode,
+//!   prompts for MFA, then resumes. The current account is shown at the top
+//!   of the tab.
 //!
-//! Actions (release, approve, push) live in the CLI — they require MFA
-//! and confirmation flows that don't compose well with a TUI event loop.
+//! Actions that interact with the user (recipe create, account login) follow
+//! the same pattern: suspend the terminal, drive dialoguer/Input outside
+//! raw mode, restore the terminal and refresh state.
 
 mod state;
 mod views;
 
+use crate::aws::assume;
+use crate::commands::recipe as recipe_cmd;
 use crate::config::{GlobalConfig, ProjectRegistry};
 use crate::error::Result;
 use crate::recipe::Recipe;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -33,7 +40,6 @@ pub async fn run() -> Result<()> {
     let global = GlobalConfig::load_or_default()?;
     let mut state = AppState::new(projects, recipes, global.accounts);
 
-    // mpsc channel for async stage-fetch results from background tasks.
     let (tx, mut rx) = mpsc::unbounded_channel::<state::StageFetchResult>();
 
     let mut terminal = setup_terminal()?;
@@ -54,9 +60,36 @@ fn setup_terminal() -> Result<Term> {
 
 fn restore_terminal(terminal: &mut Term) -> Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+/// Suspends the TUI for an interactive prompt, runs `body`, then resumes.
+/// Whatever `body` returns is passed back to the caller along with a fresh
+/// terminal handle.
+fn with_suspend<T>(
+    terminal: &mut Term,
+    body: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    restore_terminal(terminal)?;
+    let result = body();
+    // Resume even if body errored, so the user always returns to the TUI.
+    *terminal = setup_terminal()?;
+    terminal.clear()?;
+    result
+}
+
+#[derive(Debug)]
+enum Action {
+    None,
+    StageFetch,
+    AssumeSelected,
+    NewRecipe,
 }
 
 async fn event_loop(
@@ -66,25 +99,50 @@ async fn event_loop(
     rx: &mut mpsc::UnboundedReceiver<state::StageFetchResult>,
 ) -> Result<()> {
     loop {
-        // Drain any pending async results.
         while let Ok(result) = rx.try_recv() {
             state.apply_stage_fetch(result);
         }
 
         terminal.draw(|f| views::draw(f, state))?;
 
-        // Block briefly for input so we don't peg the CPU but stay
-        // responsive to channel messages too.
-        if event::poll(Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if is_quit(&key) {
-                        return Ok(());
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if is_quit(&key) {
+            return Ok(());
+        }
+        match handle_key(state, key.code) {
+            Action::None => {}
+            Action::StageFetch => state.start_stage_fetch(tx.clone()),
+            Action::AssumeSelected => {
+                if let Some(account) = state.selected_account_name().map(str::to_owned) {
+                    let outcome = with_suspend(terminal, || perform_assume(&account));
+                    match outcome {
+                        Ok(()) => {
+                            state.status = Some(format!("assumed into {account}"));
+                        }
+                        Err(e) => {
+                            state.status = Some(format!("assume failed: {e}"));
+                        }
                     }
-                    handle_key(state, key.code, &tx);
                 }
-                Event::Resize(_, _) => {}
-                _ => {}
+            }
+            Action::NewRecipe => {
+                let outcome = with_suspend(terminal, || {
+                    recipe_cmd::create_interactive(None).map(|p| p.display().to_string())
+                });
+                match outcome {
+                    Ok(path) => {
+                        state.recipes = Recipe::list()?;
+                        state.status = Some(format!("saved recipe → {path}"));
+                    }
+                    Err(e) => {
+                        state.status = Some(format!("recipe create failed: {e}"));
+                    }
+                }
             }
         }
     }
@@ -96,24 +154,47 @@ fn is_quit(key: &event::KeyEvent) -> bool {
             && matches!(key.code, KeyCode::Char('c')))
 }
 
-fn handle_key(
-    state: &mut AppState,
-    code: KeyCode,
-    tx: &mpsc::UnboundedSender<state::StageFetchResult>,
-) {
+fn handle_key(state: &mut AppState, code: KeyCode) -> Action {
     match code {
-        KeyCode::Tab => state.next_tab(),
-        KeyCode::BackTab => state.prev_tab(),
-        KeyCode::Char('1') => state.tab = Tab::Projects,
-        KeyCode::Char('2') => state.tab = Tab::Recipes,
-        KeyCode::Char('3') => state.tab = Tab::Accounts,
-        KeyCode::Down | KeyCode::Char('j') => state.move_down(),
-        KeyCode::Up | KeyCode::Char('k') => state.move_up(),
-        KeyCode::Char('r') => {
-            if matches!(state.tab, Tab::Projects) {
-                state.start_stage_fetch(tx.clone());
-            }
+        KeyCode::Tab => {
+            state.next_tab();
+            Action::None
         }
-        _ => {}
+        KeyCode::BackTab => {
+            state.prev_tab();
+            Action::None
+        }
+        KeyCode::Char('1') => {
+            state.tab = Tab::Projects;
+            Action::None
+        }
+        KeyCode::Char('2') => {
+            state.tab = Tab::Recipes;
+            Action::None
+        }
+        KeyCode::Char('3') => {
+            state.tab = Tab::Accounts;
+            Action::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.move_down();
+            Action::None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.move_up();
+            Action::None
+        }
+        KeyCode::Char('r') if matches!(state.tab, Tab::Projects) => Action::StageFetch,
+        KeyCode::Char('n') if matches!(state.tab, Tab::Recipes) => Action::NewRecipe,
+        KeyCode::Char('l') if matches!(state.tab, Tab::Accounts) => Action::AssumeSelected,
+        KeyCode::Enter if matches!(state.tab, Tab::Accounts) => Action::AssumeSelected,
+        _ => Action::None,
     }
+}
+
+fn perform_assume(account: &str) -> Result<()> {
+    let mfa = assume::prompt_mfa(account)?;
+    let vars = assume::run(account, Some(&mfa))?;
+    assume::apply_to_env(&vars);
+    Ok(())
 }

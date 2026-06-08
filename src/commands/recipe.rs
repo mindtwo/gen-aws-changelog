@@ -15,11 +15,33 @@ pub async fn run(cmd: RecipeCommand) -> Result<()> {
 }
 
 async fn create(name: String) -> Result<()> {
+    let path = create_interactive(Some(name))?;
+    println!("{} saved recipe to {}", "✓".green().bold(), path.display());
+    Ok(())
+}
+
+/// Drives the recipe creation flow with interactive prompts. If `name` is
+/// `None`, prompts for it. Returns the saved file path. Callable from the
+/// CLI and TUI (the TUI suspends raw mode before calling).
+pub fn create_interactive(name: Option<String>) -> Result<std::path::PathBuf> {
     let projects = ProjectRegistry::list()?;
     if projects.is_empty() {
         anyhow::bail!("no projects registered — run `aws-utils add` first");
     }
     let project_names: Vec<String> = projects.iter().map(|p| p.name.clone()).collect();
+
+    let name = match name {
+        Some(n) if !n.is_empty() => n,
+        _ => Input::<String>::with_theme(&ColorfulTheme::default())
+            .with_prompt("Recipe name")
+            .interact_text()?,
+    };
+    if name.trim().is_empty() {
+        anyhow::bail!("recipe name cannot be empty");
+    }
+    if Recipe::file_path(&name)?.exists() {
+        anyhow::bail!("recipe '{}' already exists", name);
+    }
 
     let description: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("Recipe description")
@@ -30,7 +52,6 @@ async fn create(name: String) -> Result<()> {
         .with_prompt("Pick the projects to include (in release order)")
         .items(&project_names)
         .interact()?;
-
     if selected.is_empty() {
         anyhow::bail!("a recipe needs at least one step");
     }
@@ -43,13 +64,11 @@ async fn create(name: String) -> Result<()> {
         .collect();
 
     let recipe = Recipe {
-        name: name.clone(),
+        name,
         description,
         steps,
     };
-    let path = recipe.save()?;
-    println!("{} saved recipe to {}", "✓".green().bold(), path.display());
-    Ok(())
+    recipe.save()
 }
 
 async fn list() -> Result<()> {
