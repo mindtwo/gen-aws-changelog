@@ -11,6 +11,11 @@ pub struct ProjectConfig {
     pub to_stage: String,
     #[serde(default)]
     pub jira: JiraConfig,
+    /// Which preconfigured account name (from global config) to assume into
+    /// for each action group. Skipped when `AWS_SESSION_TOKEN` is already set
+    /// in the env.
+    #[serde(default)]
+    pub aws: AwsAccounts,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -18,6 +23,32 @@ pub struct JiraConfig {
     /// JIRA project key prefixes to match in commit messages (e.g. ["LEARN"])
     #[serde(default)]
     pub prefixes: Vec<String>,
+}
+
+/// Per-action account selection. All fields optional; `release` covers
+/// check/changelog/release, `s3` covers s3-check. Falls back to `default`
+/// when an action-specific slot is unset.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct AwsAccounts {
+    pub default: Option<String>,
+    pub release: Option<String>,
+    pub s3: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AwsAction {
+    Release,
+    S3,
+}
+
+impl AwsAccounts {
+    pub fn account_for(&self, action: AwsAction) -> Option<&str> {
+        let primary = match action {
+            AwsAction::Release => self.release.as_deref(),
+            AwsAction::S3 => self.s3.as_deref(),
+        };
+        primary.or(self.default.as_deref())
+    }
 }
 
 impl ProjectConfig {
@@ -43,6 +74,7 @@ impl ProjectConfig {
             from_stage: "DeployPreProd".to_string(),
             to_stage: "DeployProd".to_string(),
             jira: JiraConfig::default(),
+            aws: AwsAccounts::default(),
         }
     }
 }

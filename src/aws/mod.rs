@@ -3,6 +3,7 @@
 //! default credential provider chain (env vars, shared credentials file,
 //! SSO, IMDS, ...).
 
+pub mod assume;
 pub mod codepipeline;
 pub mod s3;
 

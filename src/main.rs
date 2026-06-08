@@ -58,6 +58,8 @@ async fn dispatch(args: Cli) -> error::Result<()> {
         Command::Release(a) => commands::release::run(a).await,
         Command::Recipe(c) => commands::recipe::run(c).await,
         Command::S3Check(a) => commands::s3_check::run(a).await,
+        Command::Accounts(c) => commands::accounts::run(c).await,
+        Command::Assume(a) => commands::assume::run(a).await,
         Command::Tui => commands::tui::run().await,
     }
 }

@@ -46,14 +46,45 @@ aws-utils config show               # print the effective config
 aws-utils config edit               # open .aws-utils.toml in $EDITOR
 aws-utils config push               # commit + push .aws-utils.toml
 aws-utils config pull               # pull .aws-utils.toml from the repo
+aws-utils accounts add NAME [--description "..."]
+aws-utils accounts list             # see your configured AWS account names
+aws-utils accounts remove NAME
+aws-utils assume [ACCOUNT]          # eval-style: eval "$(aws-utils assume X)"
 aws-utils check                     # compare deployed commits between stages
 aws-utils changelog --out FILE      # render markdown changelog (commits + JIRA)
 aws-utils release                   # changelog → approve → annotated tag
 aws-utils recipe create <name>      # bundle multiple projects into a recipe
 aws-utils recipe list
 aws-utils recipe run <name>         # sequential release with confirmation
-aws-utils s3-check paths.txt --bucket B
+aws-utils s3-check paths.txt --bucket B [--project NAME]
 ```
+
+## AWS authentication via `assume-role`
+
+`aws-utils` integrates with the `assume-role` shell script. Once accounts
+are registered globally and named in a project's config, commands that
+talk to AWS auto-run `assume-role` (prompting once for MFA) before any
+SDK call. Auto-assume is skipped if `AWS_SESSION_TOKEN` is already set
+in your environment, so manually-assumed sessions are respected.
+
+```bash
+# 1. Register accounts once
+aws-utils accounts add prod-app-teach --description "production"
+aws-utils accounts add media-app-teach --description "media bucket account"
+
+# 2. Map them to action groups in .aws-utils.toml (per-project)
+[aws]
+release = "prod-app-teach"   # used by check / changelog / release
+s3      = "media-app-teach"  # used by s3-check
+# default = "prod-app-teach" # optional fallback for any action
+
+# 3. Run commands normally — MFA is prompted once per process
+aws-utils check
+aws-utils s3-check paths.txt --bucket media-bucket
+```
+
+The assume-role binary path defaults to `/usr/local/bin/assume-role`;
+override with `AWS_UTILS_ASSUME_ROLE` if it lives elsewhere.
 
 All commands accept `--region`, `-v/--verbose`, `-q/--quiet`, and
 `--no-color`.

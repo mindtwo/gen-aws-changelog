@@ -15,9 +15,10 @@ pub mod project;
 pub mod registry;
 pub mod resolve;
 
-pub use project::ProjectConfig;
-pub use registry::{RegistryEntry, ProjectRegistry};
-pub use resolve::{Resolved, Overrides};
+#[allow(unused_imports)]
+pub use project::{AwsAccounts, ProjectConfig};
+pub use registry::{ProjectRegistry, RegistryEntry};
+pub use resolve::{Overrides, Resolved};
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +31,16 @@ pub struct GlobalConfig {
     pub defaults: Defaults,
     #[serde(default)]
     pub github: GithubGlobal,
+    /// Pre-configured AWS account names (passed to `assume-role`).
+    #[serde(default, rename = "accounts")]
+    pub accounts: Vec<Account>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Account {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -53,5 +64,13 @@ impl GlobalConfig {
         let cfg: Self = toml::from_str(&text)
             .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
         Ok(cfg)
+    }
+
+    pub fn save(&self) -> crate::error::Result<()> {
+        let path = paths::global_config_file()?;
+        paths::ensure_dir(path.parent().unwrap())?;
+        std::fs::write(&path, toml::to_string_pretty(self)?)
+            .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+        Ok(())
     }
 }

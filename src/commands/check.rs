@@ -1,5 +1,7 @@
 use crate::aws::{codepipeline::PipelineClient, load_sdk_config};
 use crate::cli::CheckArgs;
+use crate::commands::auto_assume;
+use crate::config::project::AwsAction;
 use crate::config::{Overrides, Resolved};
 use crate::error::Result;
 use crate::github::{compare::compare_commits, GithubClient};
@@ -14,6 +16,7 @@ pub async fn run(args: CheckArgs) -> Result<()> {
         ..Default::default()
     })?;
 
+    auto_assume::ensure(&resolved, AwsAction::Release)?;
     let sdk = load_sdk_config(&resolved.region).await;
     let pipeline = PipelineClient::new(&sdk, &resolved.pipeline);
 

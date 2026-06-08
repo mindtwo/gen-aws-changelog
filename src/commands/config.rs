@@ -42,6 +42,19 @@ async fn show(project: Option<String>) -> Result<()> {
             resolved.project.jira.prefixes.join(", ")
         );
     }
+    let aws = &resolved.project.aws;
+    if aws.default.is_some() || aws.release.is_some() || aws.s3.is_some() {
+        println!("  {}", "aws accounts:".bold());
+        if let Some(v) = &aws.default {
+            println!("    default = {v}");
+        }
+        if let Some(v) = &aws.release {
+            println!("    release = {v}");
+        }
+        if let Some(v) = &aws.s3 {
+            println!("    s3      = {v}");
+        }
+    }
     Ok(())
 }
 

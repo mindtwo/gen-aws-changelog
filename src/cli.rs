@@ -55,8 +55,40 @@ pub enum Command {
     #[command(name = "s3-check")]
     S3Check(S3CheckArgs),
 
+    /// Manage the list of pre-configured AWS account names
+    #[command(subcommand)]
+    Accounts(AccountsCommand),
+
+    /// Run the assume-role script and emit shell `export` statements
+    Assume(AssumeArgs),
+
     /// Launch the interactive TUI
     Tui,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AccountsCommand {
+    /// Add an account to the global config
+    Add {
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// List all pre-configured accounts
+    List,
+    /// Remove an account from the global config
+    Remove { name: String },
+}
+
+#[derive(Debug, Args)]
+pub struct AssumeArgs {
+    /// Account name (one of the pre-configured accounts). Interactive
+    /// picker if omitted.
+    pub account: Option<String>,
+    /// Skip the MFA prompt — useful with YubiKey integration where
+    /// the script obtains the token itself.
+    #[arg(long)]
+    pub no_mfa: bool,
 }
 
 #[derive(Debug, Args)]
@@ -160,4 +192,8 @@ pub struct S3CheckArgs {
     /// Look up delete markers and report deletion timestamps for missing keys
     #[arg(long)]
     pub show_deleted: bool,
+    /// Project name to use for auto-assume (defaults to project for cwd
+    /// if any; omit to skip assume-role)
+    #[arg(long)]
+    pub project: Option<String>,
 }

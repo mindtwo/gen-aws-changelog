@@ -1,4 +1,7 @@
+pub mod accounts;
 pub mod add;
+pub mod assume;
+pub mod auto_assume;
 pub mod changelog;
 pub mod check;
 pub mod config;

@@ -1,5 +1,8 @@
 use crate::aws::{load_sdk_config, s3::S3};
 use crate::cli::S3CheckArgs;
+use crate::commands::auto_assume;
+use crate::config::project::AwsAction;
+use crate::config::{Overrides, Resolved};
 use crate::error::Result;
 use crate::ui::{progress, prompts};
 use colored::Colorize;
@@ -14,7 +17,25 @@ pub async fn run(args: S3CheckArgs) -> Result<()> {
         anyhow::bail!("no keys in {}", args.file.display());
     }
 
-    let region = std::env::var("AWS_REGION").unwrap_or_else(|_| DEFAULT_REGION.to_string());
+    // Auto-assume when a project context is available. This is best-effort:
+    // s3-check is also runnable without a project (`--project ""` to opt out).
+    let resolved = match args.project.as_deref() {
+        Some("") => None,
+        _ => Resolved::from_overrides(&Overrides {
+            project: args.project.clone(),
+            ..Default::default()
+        })
+        .ok(),
+    };
+    if let Some(r) = &resolved {
+        auto_assume::ensure(r, AwsAction::S3)?;
+    }
+
+    let region = resolved
+        .as_ref()
+        .map(|r| r.region.clone())
+        .or_else(|| std::env::var("AWS_REGION").ok())
+        .unwrap_or_else(|| DEFAULT_REGION.to_string());
     let sdk = load_sdk_config(&region).await;
     let s3 = Arc::new(S3::new(&sdk));
 
