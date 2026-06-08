@@ -55,14 +55,12 @@ impl ProjectConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
-        toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))
+        toml::from_str(&text).map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text)
-            .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+        std::fs::write(path, text).map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
         Ok(())
     }
 

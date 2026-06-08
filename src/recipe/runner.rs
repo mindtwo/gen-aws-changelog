@@ -33,11 +33,9 @@ pub async fn run(recipe: &Recipe) -> Result<()> {
         })
         .await?;
 
-        if i < recipe.steps.len() - 1 {
-            if !prompts::confirm("Continue with next step?", true)? {
-                println!("{}", "recipe aborted".yellow().bold());
-                return Ok(());
-            }
+        if i < recipe.steps.len() - 1 && !prompts::confirm("Continue with next step?", true)? {
+            println!("{}", "recipe aborted".yellow().bold());
+            return Ok(());
         }
     }
 

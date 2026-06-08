@@ -36,8 +36,7 @@ impl Recipe {
         let path = Self::file_path(name)?;
         let text = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
-        toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))
+        toml::from_str(&text).map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))
     }
 
     pub fn list() -> Result<Vec<Recipe>> {

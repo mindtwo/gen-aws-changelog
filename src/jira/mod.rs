@@ -2,7 +2,7 @@ pub mod extract;
 pub mod fetch;
 
 use crate::error::{AppError, Result};
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
 use std::time::Duration;
 
 pub struct JiraClient {
@@ -12,12 +12,11 @@ pub struct JiraClient {
 
 impl JiraClient {
     pub fn from_env() -> Result<Self> {
-        let base_url = std::env::var("JIRA_BASE_URL")
-            .map_err(|_| AppError::MissingEnv("JIRA_BASE_URL"))?;
-        let email = std::env::var("JIRA_EMAIL")
-            .map_err(|_| AppError::MissingEnv("JIRA_EMAIL"))?;
-        let token = std::env::var("JIRA_API_TOKEN")
-            .map_err(|_| AppError::MissingEnv("JIRA_API_TOKEN"))?;
+        let base_url =
+            std::env::var("JIRA_BASE_URL").map_err(|_| AppError::MissingEnv("JIRA_BASE_URL"))?;
+        let email = std::env::var("JIRA_EMAIL").map_err(|_| AppError::MissingEnv("JIRA_EMAIL"))?;
+        let token =
+            std::env::var("JIRA_API_TOKEN").map_err(|_| AppError::MissingEnv("JIRA_API_TOKEN"))?;
 
         let auth = format!("{email}:{token}");
         let encoded = basic_b64(auth.as_bytes());
@@ -52,9 +51,8 @@ impl JiraClient {
 }
 
 fn basic_b64(input: &[u8]) -> String {
-    const T: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };

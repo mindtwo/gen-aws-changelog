@@ -98,7 +98,8 @@ async fn list() -> Result<()> {
 
 async fn run_recipe(name: String) -> Result<()> {
     let recipe = Recipe::load(&name)?;
-    println!("{} {} step{}",
+    println!(
+        "{} {} step{}",
         "loaded recipe".dimmed(),
         recipe.steps.len(),
         if recipe.steps.len() == 1 { "" } else { "s" },

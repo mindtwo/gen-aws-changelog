@@ -168,15 +168,11 @@ pub struct ReleaseArgs {
 #[derive(Debug, Subcommand)]
 pub enum RecipeCommand {
     /// Create a new recipe interactively
-    Create {
-        name: String,
-    },
+    Create { name: String },
     /// List all recipes in the global config dir
     List,
     /// Run a recipe by name
-    Run {
-        name: String,
-    },
+    Run { name: String },
 }
 
 #[derive(Debug, Args)]

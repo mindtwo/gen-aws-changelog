@@ -153,7 +153,7 @@ fn short(sha: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::github::compare::{CommitDetails, Commit};
+    use crate::github::compare::{Commit, CommitDetails};
 
     fn commit(sha: &str, msg: &str) -> Commit {
         Commit {

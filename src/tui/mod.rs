@@ -71,14 +71,17 @@ fn restore_terminal(terminal: &mut Term) -> Result<()> {
 
 /// Suspends the TUI for an interactive prompt, runs `body`, then resumes.
 /// Whatever `body` returns is passed back to the caller along with a fresh
-/// terminal handle.
-fn with_suspend<T>(
-    terminal: &mut Term,
-    body: impl FnOnce() -> Result<T>,
-) -> Result<T> {
+/// terminal handle. When `body` errors we pause for a keypress before
+/// resuming so the user can actually read anything the failing subprocess
+/// printed to stderr.
+fn with_suspend<T>(terminal: &mut Term, body: impl FnOnce() -> Result<T>) -> Result<T> {
     restore_terminal(terminal)?;
     let result = body();
-    // Resume even if body errored, so the user always returns to the TUI.
+    if result.is_err() {
+        eprintln!("\nPress Enter to return to the TUI...");
+        let mut buf = String::new();
+        let _ = std::io::stdin().read_line(&mut buf);
+    }
     *terminal = setup_terminal()?;
     terminal.clear()?;
     result
@@ -90,6 +93,7 @@ enum Action {
     StageFetch,
     AssumeSelected,
     NewRecipe,
+    ClearStatus,
 }
 
 async fn event_loop(
@@ -116,6 +120,7 @@ async fn event_loop(
         }
         match handle_key(state, key.code) {
             Action::None => {}
+            Action::ClearStatus => state.status = None,
             Action::StageFetch => state.start_stage_fetch(tx.clone()),
             Action::AssumeSelected => {
                 if let Some(account) = state.selected_account_name().map(str::to_owned) {
@@ -150,8 +155,7 @@ async fn event_loop(
 
 fn is_quit(key: &event::KeyEvent) -> bool {
     matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-        || (key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('c')))
+        || (key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')))
 }
 
 fn handle_key(state: &mut AppState, code: KeyCode) -> Action {
@@ -184,6 +188,7 @@ fn handle_key(state: &mut AppState, code: KeyCode) -> Action {
             state.move_up();
             Action::None
         }
+        KeyCode::Char('c') if state.status.is_some() => Action::ClearStatus,
         KeyCode::Char('r') if matches!(state.tab, Tab::Projects) => Action::StageFetch,
         KeyCode::Char('n') if matches!(state.tab, Tab::Recipes) => Action::NewRecipe,
         KeyCode::Char('l') if matches!(state.tab, Tab::Accounts) => Action::AssumeSelected,

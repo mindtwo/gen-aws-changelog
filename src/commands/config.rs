@@ -144,8 +144,7 @@ async fn pull(project: Option<String>) -> Result<()> {
     let gh = GithubClient::new(&entry.repo)?;
     let bytes = fetch_file(&gh, &entry.config).await?;
     let path = entry.project_config_path();
-    std::fs::write(&path, &bytes)
-        .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+    std::fs::write(&path, &bytes).map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
     // Validate the result so a malformed remote doesn't go unnoticed.
     ProjectConfig::load(&path)?;
     println!(

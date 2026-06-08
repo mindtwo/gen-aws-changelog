@@ -49,8 +49,8 @@ impl ProjectRegistry {
         }
         let text = std::fs::read_to_string(&file)
             .map_err(|e| anyhow::anyhow!("read {}: {e}", file.display()))?;
-        let entry: RegistryEntry = toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("parse {}: {e}", file.display()))?;
+        let entry: RegistryEntry =
+            toml::from_str(&text).map_err(|e| anyhow::anyhow!("parse {}: {e}", file.display()))?;
         Ok(entry)
     }
 

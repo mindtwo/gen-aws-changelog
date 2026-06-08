@@ -28,7 +28,10 @@ pub async fn run(args: ReleaseArgs) -> Result<()> {
     )?;
 
     if from.revision_id == to.revision_id {
-        println!("{}", "stages are at the same revision — nothing to release".dimmed());
+        println!(
+            "{}",
+            "stages are at the same revision — nothing to release".dimmed()
+        );
         return Ok(());
     }
 
@@ -115,7 +118,12 @@ pub async fn run(args: ReleaseArgs) -> Result<()> {
         changelog
     };
     git::tag_release(&repo, &from.revision_id, &tag_name, &tag_message)?;
-    println!("{} tagged {} → {}", "✓".green().bold(), tag_name, short(&from.revision_id));
+    println!(
+        "{} tagged {} → {}",
+        "✓".green().bold(),
+        tag_name,
+        short(&from.revision_id)
+    );
 
     if prompts::confirm("Push tag to origin?", true)? {
         git::push_tag(&repo, "origin", &tag_name)?;

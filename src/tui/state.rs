@@ -4,7 +4,7 @@ use crate::config::project::AwsAction;
 use crate::config::{Account, ProjectConfig, RegistryEntry};
 use crate::recipe::Recipe;
 use ratatui::widgets::ListState;
-use std::path::PathBuf;
+use std::path::Path;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,11 +32,14 @@ impl Tab {
 pub enum StageFetchState {
     Idle,
     Loading,
-    Ready {
-        from: StageRevision,
-        to: StageRevision,
-    },
+    Ready(Box<StageReady>),
     Failed(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct StageReady {
+    pub from: StageRevision,
+    pub to: StageRevision,
 }
 
 #[derive(Debug)]
@@ -66,7 +69,7 @@ impl ProjectView {
     }
 }
 
-fn load_project_config(path: &PathBuf) -> (Option<ProjectConfig>, Option<String>) {
+fn load_project_config(path: &Path) -> (Option<ProjectConfig>, Option<String>) {
     if !path.exists() {
         return (None, Some(format!("{} not found", path.display())));
     }
@@ -90,11 +93,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        registry: Vec<RegistryEntry>,
-        recipes: Vec<Recipe>,
-        accounts: Vec<Account>,
-    ) -> Self {
+    pub fn new(registry: Vec<RegistryEntry>, recipes: Vec<Recipe>, accounts: Vec<Account>) -> Self {
         let projects: Vec<ProjectView> = registry.into_iter().map(ProjectView::new).collect();
         let mut projects_list = ListState::default();
         if !projects.is_empty() {
@@ -223,7 +222,7 @@ impl AppState {
         tokio::spawn(async move {
             let result = fetch_stage_state(&pipeline, &region, &from_stage, &to_stage, &account)
                 .await
-                .map(|(from, to)| StageFetchState::Ready { from, to })
+                .map(|(from, to)| StageFetchState::Ready(Box::new(StageReady { from, to })))
                 .unwrap_or_else(|e| StageFetchState::Failed(format!("{e}")));
             let _ = tx.send(StageFetchResult {
                 project_name: name,

@@ -2,14 +2,25 @@
 
 AWS pipeline management utility for mindtwo. Compares deployed stages,
 generates JIRA-enriched changelogs, approves manual-approval releases,
-runs multi-pipeline recipes, and audits S3 buckets.
-
-> **v2 status (this branch):** Rust rewrite of the original Node.js
-> `@mindtwo/gen-aws-changelog`. Core CLI is functional. The interactive
-> TUI (`aws-utils tui`) and CI release workflow are not yet implemented —
-> see the plan file referenced in commit history.
+runs multi-pipeline recipes, and audits S3 buckets. Ships as a single
+static binary; also includes a read-only ratatui browser (`aws-utils
+tui`) over projects, recipes, and accounts.
 
 ## Install
+
+### From a GitHub release (recommended)
+
+Each tagged release attaches prebuilt binaries for Linux (x86_64,
+aarch64) and macOS (x86_64, aarch64) at:
+
+```
+https://github.com/mindtwo/gen-aws-changelog/releases
+```
+
+Download the tarball for your platform, extract it, and put `aws-utils`
+on your `$PATH`. Each archive ships with a `.sha256` checksum.
+
+### From source
 
 Requires Rust 1.80+.
 
@@ -17,7 +28,7 @@ Requires Rust 1.80+.
 cargo install --git https://github.com/mindtwo/gen-aws-changelog --branch v2
 ```
 
-Or build from source:
+Or clone and build:
 
 ```bash
 git clone https://github.com/mindtwo/gen-aws-changelog
@@ -108,6 +119,25 @@ The global registry (`~/.config/aws-utils/projects/<name>.toml` on
 Linux, `~/Library/Application Support/aws-utils/projects/` on macOS) is
 what lets `aws-utils` find your project from any directory. Recipes
 live next to it under `recipes/`.
+
+## Development
+
+The repo uses GitHub Actions for CI (`.github/workflows/ci.yml`) and
+release builds (`.github/workflows/release.yml`). CI runs the same
+three checks locally:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+```
+
+Cutting a release: push a tag matching `v*` (e.g. `v0.2.0`). The
+release workflow builds for `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`,
+`aarch64-apple-darwin` and publishes a GitHub release with the
+tarballs + sha256 checksums attached. Pre-release tags
+(e.g. `v0.2.0-rc1`) are auto-marked as prereleases.
 
 ## License
 

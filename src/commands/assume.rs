@@ -7,9 +7,7 @@ use crate::ui::prompts;
 pub async fn run(args: AssumeArgs) -> Result<()> {
     let cfg = GlobalConfig::load_or_default()?;
     if cfg.accounts.is_empty() {
-        anyhow::bail!(
-            "no accounts configured — run `aws-utils accounts add <name>` first"
-        );
+        anyhow::bail!("no accounts configured — run `aws-utils accounts add <name>` first");
     }
 
     let account = match args.account {

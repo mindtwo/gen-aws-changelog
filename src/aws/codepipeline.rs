@@ -69,9 +69,7 @@ impl PipelineClient {
             .latest_execution
             .as_ref()
             .map(|e| e.pipeline_execution_id.clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!("stage '{stage_name}' has no latest execution")
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("stage '{stage_name}' has no latest execution"))?;
 
         let execution = self
             .client
@@ -81,16 +79,12 @@ impl PipelineClient {
             .send()
             .await?
             .pipeline_execution
-            .ok_or_else(|| {
-                anyhow::anyhow!("no pipeline execution returned for {execution_id}")
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("no pipeline execution returned for {execution_id}"))?;
 
         let revision = execution
             .artifact_revisions()
             .first()
-            .ok_or_else(|| {
-                anyhow::anyhow!("execution {execution_id} has no artifact revisions")
-            })?
+            .ok_or_else(|| anyhow::anyhow!("execution {execution_id} has no artifact revisions"))?
             .clone();
 
         Ok(StageRevision {

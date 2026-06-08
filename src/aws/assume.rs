@@ -2,11 +2,16 @@
 //!
 //! The script supports `OUTPUT_TO_EVAL=true` which:
 //! - suppresses interactive prompts (account/role/region)
-//! - emits `export KEY="VALUE";` lines on stdout
+//! - emits `export KEY="VALUE";` lines on stdout (for `eval` consumers)
+//! - emits diagnostic messages as `echo "...";` lines on **stdout** too,
+//!   so a shell `eval` prints them when it executes the captured output
 //! - expects the MFA token as the third positional arg (no prompt)
 //!
 //! We collect the MFA token ourselves (so the script's stdout stays clean
-//! for parsing), then spawn the script and parse the exports.
+//! for parsing), then spawn the script and pull both kinds of lines out
+//! of stdout. Echo lines are re-emitted on stderr so the user actually
+//! sees diagnostics (instead of them being silently dropped by us), and
+//! they get folded into the error message when the script fails.
 
 use crate::error::Result;
 use dialoguer::{theme::ColorfulTheme, Password};
@@ -44,6 +49,15 @@ pub fn prompt_mfa(account: &str) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("mfa prompt: {e}"))
 }
 
+#[derive(Debug, Default)]
+pub struct AssumeOutput {
+    pub exports: HashMap<String, String>,
+    /// Lines the script wrote as `echo "..."` on stdout — these are the
+    /// user-facing diagnostic messages it would have printed in
+    /// non-eval mode.
+    pub messages: Vec<String>,
+}
+
 /// Run the assume-role script and return the captured `export` map.
 /// `mfa_token` may be `None` if the user has a YubiKey configured or the
 /// script can find one elsewhere — we let the script decide.
@@ -68,38 +82,67 @@ pub fn run(account: &str, mfa_token: Option<&str>) -> Result<HashMap<String, Str
     let output = cmd
         .output()
         .map_err(|e| anyhow::anyhow!("spawn {}: {e}", binary.display()))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed = parse_output(&stdout);
+
+    // Always reflect the script's diagnostic messages back to the user.
+    // The script puts these on stdout (wrapped as `echo "...";`) so a
+    // shell `eval` prints them; we capture stdout to extract the
+    // exports, so we'd silently drop them otherwise.
+    for msg in &parsed.messages {
+        eprintln!("{msg}");
+    }
+
     if !output.status.success() {
         anyhow::bail!(
-            "assume-role exited with status {} (see stderr above)",
-            output.status
+            "assume-role exited with {}{}",
+            output.status,
+            format_messages(&parsed.messages),
         );
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_exports(&stdout)
+    if parsed.exports.is_empty() {
+        anyhow::bail!(
+            "assume-role returned no credentials{}",
+            format_messages(&parsed.messages),
+        );
+    }
+    Ok(parsed.exports)
 }
 
-/// Parse `export KEY="VALUE";` lines from `text` into a flat map. Lines
-/// that don't match are ignored. Empty values are also kept (the script
-/// sometimes emits blanks for vars that weren't set).
-pub fn parse_exports(text: &str) -> Result<HashMap<String, String>> {
-    static LINE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r#"^\s*export\s+([A-Z_][A-Z0-9_]*)="((?:[^"\\]|\\.)*)";?\s*$"#)
-            .expect("regex")
+fn format_messages(messages: &[String]) -> String {
+    if messages.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", messages.join(" | "))
+    }
+}
+
+/// Parse the assume-role script's stdout into structured output.
+///
+/// Recognizes:
+/// - `export KEY="VALUE";` → captured into [`AssumeOutput::exports`]
+/// - `echo "MESSAGE";` → captured into [`AssumeOutput::messages`]
+///
+/// Anything else is ignored.
+pub fn parse_output(text: &str) -> AssumeOutput {
+    static EXPORT: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r#"^\s*export\s+([A-Z_][A-Z0-9_]*)="((?:[^"\\]|\\.)*)";?\s*$"#).expect("regex")
     });
-    let mut out = HashMap::new();
+    static ECHO: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#"^\s*echo\s+"((?:[^"\\]|\\.)*)";?\s*$"#).expect("regex"));
+    let mut out = AssumeOutput::default();
     for line in text.lines() {
-        if let Some(caps) = LINE.captures(line) {
-            let key = caps[1].to_string();
-            let val = unescape(&caps[2]);
-            out.insert(key, val);
+        if let Some(caps) = EXPORT.captures(line) {
+            out.exports.insert(caps[1].to_string(), unescape(&caps[2]));
+        } else if let Some(caps) = ECHO.captures(line) {
+            let msg = unescape(&caps[1]);
+            if !msg.trim().is_empty() {
+                out.messages.push(msg);
+            }
         }
     }
-    if out.is_empty() {
-        anyhow::bail!(
-            "assume-role produced no `export` lines on stdout (was OUTPUT_TO_EVAL respected?)"
-        );
-    }
-    Ok(out)
+    out
 }
 
 fn unescape(s: &str) -> String {
@@ -150,17 +193,50 @@ export GEO_ENV="prod-app-teach";
 not an export line
 export AWS_EMPTY="";
 "#;
-        let map = parse_exports(sample).unwrap();
-        assert_eq!(map["AWS_REGION"], "eu-central-1");
-        assert_eq!(map["AWS_ACCESS_KEY_ID"], "AKIAEXAMPLE");
-        assert_eq!(map["AWS_SESSION_TOKEN"], "token");
-        assert_eq!(map["GEO_ENV"], "prod-app-teach");
-        assert_eq!(map["AWS_EMPTY"], "");
+        let parsed = parse_output(sample);
+        assert_eq!(parsed.exports["AWS_REGION"], "eu-central-1");
+        assert_eq!(parsed.exports["AWS_ACCESS_KEY_ID"], "AKIAEXAMPLE");
+        assert_eq!(parsed.exports["AWS_SESSION_TOKEN"], "token");
+        assert_eq!(parsed.exports["GEO_ENV"], "prod-app-teach");
+        assert_eq!(parsed.exports["AWS_EMPTY"], "");
+        assert!(parsed.messages.is_empty());
     }
 
     #[test]
-    fn empty_output_is_error() {
-        assert!(parse_exports("nothing here").is_err());
+    fn captures_echo_messages() {
+        let sample = "
+echo \"aws sts get-session-token error\";
+echo \"Failed to export session envars.\";
+";
+        let parsed = parse_output(sample);
+        assert!(parsed.exports.is_empty());
+        assert_eq!(
+            parsed.messages,
+            vec![
+                "aws sts get-session-token error".to_string(),
+                "Failed to export session envars.".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn echo_and_export_intermixed() {
+        let sample = r#"
+echo "Using source profile mindtwo";
+export AWS_REGION="eu-central-1";
+echo "switched role";
+export AWS_ACCESS_KEY_ID="AKIA";
+"#;
+        let parsed = parse_output(sample);
+        assert_eq!(parsed.exports.len(), 2);
+        assert_eq!(parsed.messages.len(), 2);
+    }
+
+    #[test]
+    fn empty_output() {
+        let parsed = parse_output("nothing here");
+        assert!(parsed.exports.is_empty());
+        assert!(parsed.messages.is_empty());
     }
 
     #[test]
@@ -175,5 +251,14 @@ export AWS_EMPTY="";
         assert!(is_propagated("KUBECONFIG"));
         assert!(!is_propagated("PATH"));
         assert!(!is_propagated("HOME"));
+    }
+
+    #[test]
+    fn format_messages_renders() {
+        assert_eq!(format_messages(&[]), "");
+        assert_eq!(
+            format_messages(&["one".into(), "two".into()]),
+            ": one | two"
+        );
     }
 }

@@ -1,5 +1,7 @@
 use crate::cli::AddArgs;
-use crate::config::{paths, ProjectConfig, ProjectRegistry, RegistryEntry, PROJECT_CONFIG_FILENAME};
+use crate::config::{
+    paths, ProjectConfig, ProjectRegistry, RegistryEntry, PROJECT_CONFIG_FILENAME,
+};
 use crate::error::{parse_repo, Result};
 use colored::Colorize;
 use std::process::Command;
@@ -89,7 +91,10 @@ fn parse_git_remote(url: &str) -> Option<String> {
         let (_, path) = rest.split_once(':')?;
         return validate(path);
     }
-    if let Some(rest) = trimmed.strip_prefix("https://").or_else(|| trimmed.strip_prefix("http://")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+    {
         // github.com/owner/name
         let (_, path) = rest.split_once('/')?;
         return validate(path);

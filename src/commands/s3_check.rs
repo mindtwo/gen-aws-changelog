@@ -108,7 +108,10 @@ pub async fn run(args: S3CheckArgs) -> Result<()> {
     }
 
     if args.show_deleted && missing > 0 {
-        println!("\n{}", "Looking up delete markers for missing keys...".dimmed());
+        println!(
+            "\n{}",
+            "Looking up delete markers for missing keys...".dimmed()
+        );
         for r in &results {
             if !r.check.ok && r.check.error.is_none() {
                 if let Ok(Some(info)) = s3.deletion_info(&bucket, &r.key).await {
@@ -158,7 +161,10 @@ fn read_keys(path: &std::path::Path) -> Result<Vec<String>> {
             .to_string();
         // For `s3://bucket/key` lines, drop the bucket prefix.
         let cleaned = if line.starts_with("s3://") {
-            stripped.splitn(2, '/').nth(1).unwrap_or(&stripped).to_string()
+            stripped
+                .split_once('/')
+                .map(|(_, rest)| rest.to_string())
+                .unwrap_or(stripped)
         } else {
             stripped
         };
@@ -186,7 +192,11 @@ mod tests {
     #[test]
     fn parses_basic_keys() {
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
-        writeln!(tmp, "# comment\nfoo/bar\n/leading/slash\ns3://mybucket/some/key\n  whitespaced  ").unwrap();
+        writeln!(
+            tmp,
+            "# comment\nfoo/bar\n/leading/slash\ns3://mybucket/some/key\n  whitespaced  "
+        )
+        .unwrap();
         let keys = read_keys(tmp.path()).unwrap();
         assert_eq!(
             keys,

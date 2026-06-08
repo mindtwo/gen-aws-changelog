@@ -3,7 +3,7 @@ pub mod contents;
 pub mod release;
 
 use crate::error::{parse_repo, Result};
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use std::time::Duration;
 
 const API_BASE: &str = "https://api.github.com";
@@ -63,14 +63,10 @@ fn resolve_token() -> Result<String> {
         Ok(out) if out.status.success() => {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if s.is_empty() {
-                anyhow::bail!(
-                    "GITHUB_TOKEN not set and `gh auth token` returned empty output"
-                );
+                anyhow::bail!("GITHUB_TOKEN not set and `gh auth token` returned empty output");
             }
             Ok(s)
         }
-        _ => anyhow::bail!(
-            "no GitHub token available: set GITHUB_TOKEN or run `gh auth login`"
-        ),
+        _ => anyhow::bail!("no GitHub token available: set GITHUB_TOKEN or run `gh auth login`"),
     }
 }

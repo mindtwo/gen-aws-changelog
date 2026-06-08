@@ -1,14 +1,14 @@
 //! Config layer.
 //!
 //! Three layers of configuration:
-//! - [`GlobalConfig`]: `~/.config/aws-utils/config.toml` (cross-project defaults)
-//! - [`RegistryEntry`]: `~/.config/aws-utils/projects/<name>.toml` (one per
+//! - `GlobalConfig` — `~/.config/aws-utils/config.toml` (cross-project defaults)
+//! - `RegistryEntry` — `~/.config/aws-utils/projects/<name>.toml` (one per
 //!   project registered via `aws-utils add`)
-//! - [`ProjectConfig`]: `.aws-utils.toml` inside the project repo (pipeline,
+//! - `ProjectConfig` — `.aws-utils.toml` inside the project repo (pipeline,
 //!   stages, jira hints — checked into version control)
 //!
-//! [`resolve`] merges them with this precedence: **CLI > project file >
-//! registry entry > global defaults**.
+//! The [`resolve`] module merges them with precedence:
+//! CLI > project file > registry entry > global defaults.
 
 pub mod paths;
 pub mod project;
@@ -61,8 +61,8 @@ impl GlobalConfig {
         }
         let text = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
-        let cfg: Self = toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
+        let cfg: Self =
+            toml::from_str(&text).map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
         Ok(cfg)
     }
 

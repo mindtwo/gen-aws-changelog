@@ -53,11 +53,7 @@ struct CompareResponse {
 /// Returns commits **between** `base` and `head`. The GitHub API's
 /// "compare" endpoint lists commits in `head` not in `base`, so call with
 /// `base = old_revision` and `head = new_revision`.
-pub async fn compare_commits(
-    client: &GithubClient,
-    base: &str,
-    head: &str,
-) -> Result<Vec<Commit>> {
+pub async fn compare_commits(client: &GithubClient, base: &str, head: &str) -> Result<Vec<Commit>> {
     let url = client.url(&format!("compare/{base}...{head}"));
     let resp = client.http().get(&url).send().await?;
     let status = resp.status();

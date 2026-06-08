@@ -25,7 +25,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 }
 
 fn draw_tabs(f: &mut Frame, area: Rect, state: &AppState) {
-    let titles = Tab::titles().map(|t| Line::from(t)).to_vec();
+    let titles = Tab::titles().map(Line::from).to_vec();
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title("aws-utils"))
         .select(state.tab.index())
@@ -43,11 +43,15 @@ fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     // show that instead of the static help. It's the most actionable
     // piece of info right after an action.
     if let Some(status) = &state.status {
+        let is_error = status_is_error(status);
+        let color = if is_error { Color::Red } else { Color::Green };
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                status.clone(),
-                Style::default().fg(Color::Green),
-            ))),
+            Paragraph::new(Line::from(vec![
+                Span::styled(status.clone(), Style::default().fg(color)),
+                Span::raw("  "),
+                Span::styled("(c", Style::default().fg(Color::Yellow)),
+                Span::raw(": clear)"),
+            ])),
             area,
         );
         return;
@@ -113,20 +117,21 @@ fn draw_projects(f: &mut Frame, area: Rect, state: &mut AppState) {
 }
 
 fn render_project_detail(pv: &ProjectView) -> Vec<Line<'_>> {
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("name:  ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(pv.entry.name.clone()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("repo:  ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(pv.entry.repo.clone()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("path:  ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(pv.entry.path.display().to_string()),
-    ]));
-    lines.push(Line::from(""));
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("name:  ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(pv.entry.name.clone()),
+        ]),
+        Line::from(vec![
+            Span::styled("repo:  ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(pv.entry.repo.clone()),
+        ]),
+        Line::from(vec![
+            Span::styled("path:  ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(pv.entry.path.display().to_string()),
+        ]),
+        Line::from(""),
+    ];
 
     if let Some(err) = &pv.config_error {
         lines.push(Line::from(Span::styled(
@@ -193,7 +198,9 @@ fn render_project_detail(pv: &ProjectView) -> Vec<Line<'_>> {
                 Style::default().fg(Color::Yellow),
             )));
         }
-        StageFetchState::Ready { from, to } => {
+        StageFetchState::Ready(ready) => {
+            let from = &ready.from;
+            let to = &ready.to;
             lines.push(Line::from(format!(
                 "  {} = {} {}",
                 from.stage,
@@ -252,11 +259,17 @@ fn draw_recipes(f: &mut Frame, area: Rect, state: &mut AppState) {
         Some(r) => {
             let mut out = vec![
                 Line::from(vec![
-                    Span::styled("name:        ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "name:        ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(r.name.clone()),
                 ]),
                 Line::from(vec![
-                    Span::styled("description: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "description: ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(r.description.clone()),
                 ]),
                 Line::from(""),
@@ -270,7 +283,9 @@ fn draw_recipes(f: &mut Frame, area: Rect, state: &mut AppState) {
             }
             out
         }
-        None => vec![Line::from("No recipes. Create one with `aws-utils recipe create <name>`.")],
+        None => vec![Line::from(
+            "No recipes. Create one with `aws-utils recipe create <name>`.",
+        )],
     };
     let para = Paragraph::new(detail)
         .block(Block::default().borders(Borders::ALL).title("Detail"))
@@ -346,4 +361,9 @@ fn draw_accounts(f: &mut Frame, area: Rect, state: &mut AppState) {
 
 fn short(sha: &str) -> String {
     sha.chars().take(7).collect()
+}
+
+fn status_is_error(status: &str) -> bool {
+    let s = status.to_ascii_lowercase();
+    s.contains("fail") || s.contains("error") || s.contains("exit")
 }

@@ -1,4 +1,6 @@
-use crate::config::{paths, GlobalConfig, ProjectConfig, ProjectRegistry, RegistryEntry, DEFAULT_REGION};
+use crate::config::{
+    paths, GlobalConfig, ProjectConfig, ProjectRegistry, RegistryEntry, DEFAULT_REGION,
+};
 use crate::error::Result;
 use std::path::PathBuf;
 

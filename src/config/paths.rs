@@ -6,8 +6,8 @@ use std::path::PathBuf;
 const APP_DIR: &str = "aws-utils";
 
 pub fn config_dir() -> Result<PathBuf> {
-    let base = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not resolve OS config dir"))?;
+    let base =
+        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("could not resolve OS config dir"))?;
     Ok(base.join(APP_DIR))
 }
 
@@ -24,7 +24,6 @@ pub fn recipes_dir() -> Result<PathBuf> {
 }
 
 pub fn ensure_dir(path: &std::path::Path) -> Result<()> {
-    std::fs::create_dir_all(path)
-        .map_err(|e| anyhow::anyhow!("create {}: {e}", path.display()))?;
+    std::fs::create_dir_all(path).map_err(|e| anyhow::anyhow!("create {}: {e}", path.display()))?;
     Ok(())
 }

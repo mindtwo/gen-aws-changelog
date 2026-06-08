@@ -26,7 +26,11 @@ pub async fn fetch_file(client: &GithubClient, path: &str) -> Result<Vec<u8>> {
         anyhow::bail!("unexpected encoding from GitHub: {}", parsed.encoding);
     }
     // GitHub wraps base64 in newlines; strip them before decoding.
-    let cleaned: String = parsed.content.chars().filter(|c| !c.is_whitespace()).collect();
+    let cleaned: String = parsed
+        .content
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     b64_decode(&cleaned).map_err(|e| anyhow::anyhow!("base64 decode failed: {e}"))
 }
 
@@ -34,8 +38,7 @@ pub async fn fetch_file(client: &GithubClient, path: &str) -> Result<Vec<u8>> {
 mod base64_compat {
     pub fn decode(s: &str) -> Result<Vec<u8>, &'static str> {
         // Standard base64 alphabet
-        const T: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut lut = [255u8; 256];
         for (i, c) in T.iter().enumerate() {
             lut[*c as usize] = i as u8;
