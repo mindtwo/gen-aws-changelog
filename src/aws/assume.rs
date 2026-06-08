@@ -233,6 +233,60 @@ fn is_propagated(key: &str) -> bool {
     key.starts_with("AWS_") || key == "GEO_ENV" || key == "KUBECONFIG"
 }
 
+/// Where the last-assumed session lands on disk. Eval-ready shell file
+/// the wrapper sources after the TUI exits.
+pub fn session_file_path() -> Option<std::path::PathBuf> {
+    Some(dirs::cache_dir()?.join("aws-utils").join("session.sh"))
+}
+
+/// Render exports as eval-able shell statements with proper escaping.
+pub fn render_exports(vars: &HashMap<String, String>) -> String {
+    let mut keys: Vec<&String> = vars.keys().filter(|k| is_propagated(k)).collect();
+    keys.sort();
+    let mut out = String::new();
+    for k in keys {
+        out.push_str(&format!("export {}=\"{}\";\n", k, escape(&vars[k])));
+    }
+    out
+}
+
+fn escape(s: &str) -> String {
+    s.replace('\\', r"\\").replace('"', r#"\""#)
+}
+
+/// Persist the propagated exports to a session file so a shell wrapper
+/// can source it after the binary exits (necessary for the TUI; nice
+/// redundancy for the CLI). File is created with mode 0600.
+pub fn write_session_file(vars: &HashMap<String, String>) -> Option<std::path::PathBuf> {
+    let path = session_file_path()?;
+    let dir = path.parent()?;
+    std::fs::create_dir_all(dir).ok()?;
+    let body = format!(
+        "# Written by aws-utils. Eval this file to load the last assumed session.\n{}",
+        render_exports(vars)
+    );
+    write_secret(&path, &body).ok()?;
+    Some(path)
+}
+
+#[cfg(unix)]
+fn write_secret(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(body.as_bytes())
+}
+
+#[cfg(not(unix))]
+fn write_secret(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    std::fs::write(path, body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

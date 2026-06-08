@@ -201,5 +201,8 @@ fn perform_assume(account: &str) -> Result<()> {
     let mfa = assume::prompt_mfa(account)?;
     let vars = assume::run(account, Some(&mfa))?;
     assume::apply_to_env(&vars);
+    // Persist for the shell wrapper so the calling shell can pick up
+    // the session after the TUI exits.
+    let _ = assume::write_session_file(&vars);
     Ok(())
 }

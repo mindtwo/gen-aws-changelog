@@ -3,6 +3,7 @@ use crate::cli::AssumeArgs;
 use crate::config::GlobalConfig;
 use crate::error::Result;
 use crate::ui::prompts;
+use std::io::IsTerminal;
 
 pub async fn run(args: AssumeArgs) -> Result<()> {
     let cfg = GlobalConfig::load_or_default()?;
@@ -32,15 +33,26 @@ pub async fn run(args: AssumeArgs) -> Result<()> {
 
     let vars = assume::run(&account, mfa.as_deref())?;
 
-    // Emit eval-style output so callers can do `eval "$(aws-utils assume X)"`.
-    let mut keys: Vec<&String> = vars.keys().collect();
-    keys.sort();
-    for k in keys {
-        println!(r#"export {}="{}";"#, k, escape(&vars[k]));
+    // Stdout: the export lines (for `eval "$(aws-utils assume X)"`).
+    print!("{}", assume::render_exports(&vars));
+
+    // Persist to disk too so the TUI wrapper / `aws-utils session` can
+    // pick them up later.
+    let session_path = assume::write_session_file(&vars);
+
+    // If we're a TTY (no `eval` capturing stdout), the user just sees
+    // a wall of `export` lines and nothing happens to their env. Warn
+    // them with the right incantation.
+    if std::io::stdout().is_terminal() {
+        eprintln!();
+        eprintln!("note: nothing was exported into your shell because stdout is a TTY.");
+        eprintln!("      Run it as one of:");
+        eprintln!("        eval \"$(aws-utils assume {account})\"");
+        if let Some(p) = &session_path {
+            eprintln!("        source {}", p.display());
+        }
+        eprintln!("      Or install the wrapper: eval \"$(aws-utils init zsh)\"  # bash/zsh");
+        eprintln!("      then use:           awsu assume {account}");
     }
     Ok(())
-}
-
-fn escape(s: &str) -> String {
-    s.replace('\\', r"\\").replace('"', r#"\""#)
 }

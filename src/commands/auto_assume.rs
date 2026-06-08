@@ -27,6 +27,7 @@ pub fn ensure(resolved: &Resolved, action: AwsAction) -> Result<()> {
     let mfa = assume::prompt_mfa(account)?;
     let vars = assume::run(account, Some(&mfa))?;
     assume::apply_to_env(&vars);
+    let _ = assume::write_session_file(&vars);
     eprintln!("{} session active for {}", "✓".green().bold(), account);
     Ok(())
 }

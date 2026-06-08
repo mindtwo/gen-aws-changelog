@@ -62,8 +62,29 @@ pub enum Command {
     /// Run the assume-role script and emit shell `export` statements
     Assume(AssumeArgs),
 
+    /// Print the last-assumed session as shell `export` statements
+    /// (useful after `aws-utils tui` exits)
+    Session,
+
+    /// Print a shell-helper function so `eval`-pipelines aren't manual
+    Init(InitArgs),
+
     /// Launch the interactive TUI
     Tui,
+}
+
+#[derive(Debug, Args)]
+pub struct InitArgs {
+    /// Shell flavour to emit. Bash and zsh share the same syntax.
+    #[arg(value_enum, default_value_t = Shell::Zsh)]
+    pub shell: Shell,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Debug, Subcommand)]

@@ -61,6 +61,8 @@ async fn dispatch(args: Cli) -> error::Result<()> {
         Command::S3Check(a) => commands::s3_check::run(a).await,
         Command::Accounts(c) => commands::accounts::run(c).await,
         Command::Assume(a) => commands::assume::run(a).await,
+        Command::Session => commands::session::run().await,
+        Command::Init(a) => commands::init::run(a).await,
         Command::Tui => commands::tui::run().await,
     }
 }

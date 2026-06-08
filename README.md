@@ -97,6 +97,44 @@ aws-utils s3-check paths.txt --bucket media-bucket
 The assume-role binary path defaults to `/usr/local/bin/assume-role`;
 override with `AWS_UTILS_ASSUME_ROLE` if it lives elsewhere.
 
+### Exporting credentials into your shell
+
+Because `aws-utils` is a separate process, `aws-utils assume <account>`
+on its own can't modify your shell's environment — a child process
+never can. Two ways to make it stick:
+
+**Recommended: install the shell wrapper** (defines an `awsu` function
+that does the `eval` for you):
+
+```bash
+# ~/.zshrc  (or ~/.bashrc)
+eval "$(aws-utils init zsh)"   # or `bash`
+
+# fish
+aws-utils init fish | source
+```
+
+Then:
+
+```bash
+awsu assume prod-app-teach     # exports AWS_* into the current shell
+awsu tui                        # if you assume in the TUI, it loads on exit
+```
+
+**Manual: eval directly**
+
+```bash
+eval "$(aws-utils assume prod-app-teach)"
+```
+
+Every successful assume (CLI, auto-assume, or TUI) also writes the
+session to `~/.cache/aws-utils/session.sh` (mode `0600`). You can
+re-load the last session into any shell with:
+
+```bash
+eval "$(aws-utils session)"     # or: . ~/.cache/aws-utils/session.sh
+```
+
 All commands accept `--region`, `-v/--verbose`, `-q/--quiet`, and
 `--no-color`.
 
