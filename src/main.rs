@@ -8,6 +8,7 @@ mod git;
 mod github;
 mod jira;
 mod recipe;
+mod tui;
 mod ui;
 
 use clap::Parser;
