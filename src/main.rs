@@ -1,7 +1,14 @@
+mod aws;
+mod changelog;
 mod cli;
 mod commands;
 mod config;
 mod error;
+mod git;
+mod github;
+mod jira;
+mod recipe;
+mod ui;
 
 use clap::Parser;
 use cli::{Cli, Command};

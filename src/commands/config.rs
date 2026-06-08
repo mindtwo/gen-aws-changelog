@@ -1,6 +1,7 @@
 use crate::cli::ConfigCommand;
 use crate::config::{resolve, Overrides, ProjectConfig, Resolved};
 use crate::error::Result;
+use crate::github::{contents::fetch_file, GithubClient};
 use colored::Colorize;
 
 pub async fn run(cmd: ConfigCommand) -> Result<()> {
@@ -69,10 +70,76 @@ async fn edit(project: Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn push(_project: Option<String>) -> Result<()> {
-    anyhow::bail!("`config push` is implemented in Phase 6 (needs git layer)")
+async fn push(project: Option<String>) -> Result<()> {
+    let entry = resolve::entry_from_overrides(&Overrides {
+        project,
+        ..Default::default()
+    })?;
+    let path = entry.project_config_path();
+    if !path.exists() {
+        anyhow::bail!(
+            "{} does not exist — run `aws-utils config edit` first",
+            path.display()
+        );
+    }
+    // Stage + commit using the system git binary (git2's index/commit
+    // dance is heavy and rebuilds nothing the user can't already see).
+    let cwd = &entry.path;
+    let rel = path
+        .strip_prefix(cwd)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .into_owned();
+    run_git(cwd, &["add", &rel])?;
+    let message = format!("chore: update {}", entry.config);
+    let status = std::process::Command::new("git")
+        .args(["-C", cwd.to_string_lossy().as_ref()])
+        .args(["diff", "--cached", "--quiet"])
+        .status()
+        .map_err(|e| anyhow::anyhow!("git diff: {e}"))?;
+    if status.success() {
+        println!("{} no staged changes — nothing to push", "·".dimmed());
+        return Ok(());
+    }
+    run_git(cwd, &["commit", "-m", &message])?;
+    run_git(cwd, &["push"])?;
+    println!("{} pushed {}", "✓".green().bold(), rel);
+    Ok(())
 }
 
-async fn pull(_project: Option<String>) -> Result<()> {
-    anyhow::bail!("`config pull` is implemented in Phase 4 (needs GitHub layer)")
+fn run_git(cwd: &std::path::Path, args: &[&str]) -> Result<()> {
+    let out = std::process::Command::new("git")
+        .args(["-C", cwd.to_string_lossy().as_ref()])
+        .args(args)
+        .output()
+        .map_err(|e| anyhow::anyhow!("git: {e}"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+async fn pull(project: Option<String>) -> Result<()> {
+    let entry = resolve::entry_from_overrides(&Overrides {
+        project,
+        ..Default::default()
+    })?;
+    let gh = GithubClient::new(&entry.repo)?;
+    let bytes = fetch_file(&gh, &entry.config).await?;
+    let path = entry.project_config_path();
+    std::fs::write(&path, &bytes)
+        .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+    // Validate the result so a malformed remote doesn't go unnoticed.
+    ProjectConfig::load(&path)?;
+    println!(
+        "{} pulled {} from {}",
+        "✓".green().bold(),
+        path.display(),
+        entry.repo,
+    );
+    Ok(())
 }
