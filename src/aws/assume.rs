@@ -1,17 +1,19 @@
 //! Wrapper around the user's `assume-role` script.
 //!
-//! The script supports `OUTPUT_TO_EVAL=true` which:
-//! - suppresses interactive prompts (account/role/region)
-//! - emits `export KEY="VALUE";` lines on stdout (for `eval` consumers)
-//! - emits diagnostic messages as `echo "...";` lines on **stdout** too,
-//!   so a shell `eval` prints them when it executes the captured output
-//! - expects the MFA token as the third positional arg (no prompt)
+//! Invariants we rely on (from inspecting the script):
+//! - `OUTPUT_TO_EVAL=true` suppresses interactive prompts and emits
+//!   `export KEY="VALUE";` lines on stdout for `eval` consumers.
+//! - Diagnostic messages get wrapped as `echo "...";` lines on **stdout**
+//!   too (so a shell `eval` prints them).
+//! - The script never assigns `mfa_token_input` from a positional arg
+//!   (the usage comment is aspirational). It's read straight from the
+//!   environment — passing it as `mfa_token_input=<token>` works.
 //!
-//! We collect the MFA token ourselves (so the script's stdout stays clean
-//! for parsing), then spawn the script and pull both kinds of lines out
-//! of stdout. Echo lines are re-emitted on stderr so the user actually
-//! sees diagnostics (instead of them being silently dropped by us), and
-//! they get folded into the error message when the script fails.
+//! We capture both stdout and stderr so failures from `aws` / `jq` /
+//! `set -e` deaths are visible. The script's echo-wrapped messages and
+//! anything it writes to stderr get printed to our stderr (so users see
+//! them in the TUI suspend window or CLI eval pipeline) and folded into
+//! the error message when the script fails.
 
 use crate::error::Result;
 use dialoguer::{theme::ColorfulTheme, Password};
@@ -73,48 +75,61 @@ pub fn run(account: &str, mfa_token: Option<&str>) -> Result<HashMap<String, Str
     let mut cmd = Command::new(&binary);
     cmd.env("OUTPUT_TO_EVAL", "true")
         .arg(account)
-        // role is auto-derived from ~/.aws/config when OUTPUT_TO_EVAL is set
-        .arg("")
-        .arg(mfa_token.unwrap_or(""))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
+    if let Some(token) = mfa_token {
+        // The script reads this from the environment, not a positional
+        // arg (despite what its usage comment says).
+        cmd.env("mfa_token_input", token);
+    }
     let output = cmd
         .output()
         .map_err(|e| anyhow::anyhow!("spawn {}: {e}", binary.display()))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     let parsed = parse_output(&stdout);
 
-    // Always reflect the script's diagnostic messages back to the user.
-    // The script puts these on stdout (wrapped as `echo "...";`) so a
-    // shell `eval` prints them; we capture stdout to extract the
-    // exports, so we'd silently drop them otherwise.
+    // Reflect everything the script wrote back to the user. The
+    // `echo "..."` messages are user-facing diagnostics that would have
+    // shown up in non-eval mode; the raw stderr captures errors from
+    // tools the script invokes (aws, jq, set -e deaths).
     for msg in &parsed.messages {
         eprintln!("{msg}");
+    }
+    if !stderr.trim().is_empty() {
+        eprint!("{stderr}");
     }
 
     if !output.status.success() {
         anyhow::bail!(
             "assume-role exited with {}{}",
             output.status,
-            format_messages(&parsed.messages),
+            format_diagnostics(&parsed.messages, &stderr),
         );
     }
     if parsed.exports.is_empty() {
         anyhow::bail!(
             "assume-role returned no credentials{}",
-            format_messages(&parsed.messages),
+            format_diagnostics(&parsed.messages, &stderr),
         );
     }
     Ok(parsed.exports)
 }
 
-fn format_messages(messages: &[String]) -> String {
-    if messages.is_empty() {
+fn format_diagnostics(messages: &[String], stderr: &str) -> String {
+    let mut parts: Vec<String> = messages.to_vec();
+    let stderr_trimmed = stderr.trim();
+    if !stderr_trimmed.is_empty() {
+        // Collapse multi-line stderr into a single inline string for
+        // the error display in the TUI status bar.
+        parts.push(stderr_trimmed.lines().collect::<Vec<_>>().join(" / "));
+    }
+    if parts.is_empty() {
         String::new()
     } else {
-        format!(": {}", messages.join(" | "))
+        format!(": {}", parts.join(" | "))
     }
 }
 
@@ -254,11 +269,19 @@ export AWS_ACCESS_KEY_ID="AKIA";
     }
 
     #[test]
-    fn format_messages_renders() {
-        assert_eq!(format_messages(&[]), "");
+    fn format_diagnostics_combines_sources() {
+        assert_eq!(format_diagnostics(&[], ""), "");
         assert_eq!(
-            format_messages(&["one".into(), "two".into()]),
+            format_diagnostics(&["one".into(), "two".into()], ""),
             ": one | two"
+        );
+        assert_eq!(
+            format_diagnostics(&[], "  An error\noccurred  "),
+            ": An error / occurred"
+        );
+        assert_eq!(
+            format_diagnostics(&["echo msg".into()], "stderr line"),
+            ": echo msg | stderr line"
         );
     }
 }
