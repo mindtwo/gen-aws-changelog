@@ -59,6 +59,10 @@ pub enum Command {
     #[command(subcommand)]
     Accounts(AccountsCommand),
 
+    /// Configure and test the JIRA Cloud integration
+    #[command(subcommand)]
+    Jira(JiraCommand),
+
     /// Run the assume-role script and emit shell `export` statements
     Assume(AssumeArgs),
 
@@ -89,6 +93,18 @@ pub enum Shell {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum JiraCommand {
+    /// Interactively store JIRA base URL, email and API token in the
+    /// global config (`~/.config/aws-utils/config.toml`, chmod 600).
+    Configure,
+    /// Hit `/myself` against JIRA with the configured credentials and
+    /// report success or failure.
+    Test,
+    /// Show currently-resolved JIRA settings (token is masked).
+    Show,
 }
 
 #[derive(Debug, Subcommand)]

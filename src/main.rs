@@ -21,6 +21,12 @@ async fn main() {
     // Load .env if present; ignore errors when no file exists.
     let _ = dotenvy::dotenv();
 
+    // Hydrate JIRA creds from the global config (no overwrite of env
+    // values that .env or the user shell already set).
+    if let Ok(cfg) = config::GlobalConfig::load_or_default() {
+        cfg.jira.hydrate_env();
+    }
+
     let args = Cli::parse();
 
     if args.no_color {
@@ -60,6 +66,7 @@ async fn dispatch(args: Cli) -> error::Result<()> {
         Command::Recipe(c) => commands::recipe::run(c).await,
         Command::S3Check(a) => commands::s3_check::run(a).await,
         Command::Accounts(c) => commands::accounts::run(c).await,
+        Command::Jira(c) => commands::jira::run(c).await,
         Command::Assume(a) => commands::assume::run(a).await,
         Command::Session => commands::session::run().await,
         Command::Logout => commands::logout::run().await,
