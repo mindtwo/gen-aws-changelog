@@ -68,7 +68,7 @@ auto-loaded). Copy `.env.example` and fill in the values you need:
 |---|---|
 | `AWS_*` / `AWS_PROFILE` | Standard AWS credential chain |
 | `GITHUB_TOKEN` | GitHub REST API; falls back to `gh auth token` |
-| `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` | Required for `changelog` ticket enrichment |
+| `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` | Required for `changelog` ticket enrichment (or run `aws-utils jira configure`) |
 
 ## Commands
 
@@ -81,6 +81,9 @@ aws-utils config pull               # pull .aws-utils.toml from the repo
 aws-utils accounts add NAME [--description "..."]
 aws-utils accounts list             # see your configured AWS account names
 aws-utils accounts remove NAME
+aws-utils jira configure            # interactively store JIRA URL + token
+aws-utils jira test                 # verify the credentials against /myself
+aws-utils jira show                 # print resolved settings (token masked)
 aws-utils assume [ACCOUNT]          # eval-style: eval "$(aws-utils assume X)"
 aws-utils check                     # compare deployed commits between stages
 aws-utils changelog --out FILE      # render markdown changelog (commits + JIRA)
