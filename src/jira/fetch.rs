@@ -1,6 +1,5 @@
 use crate::error::Result;
 use crate::jira::JiraClient;
-use futures::stream::{FuturesUnordered, StreamExt};
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -36,39 +35,70 @@ struct Assignee {
     display_name: Option<String>,
 }
 
-/// Fetch each key concurrently. Tickets that JIRA rejects (404, 403, etc.)
-/// are skipped with a warning so a single bad key doesn't fail the whole
-/// changelog.
-pub async fn fetch_tickets(client: &JiraClient, keys: &[String]) -> Result<Vec<Ticket>> {
-    let mut tasks = FuturesUnordered::new();
-    for key in keys {
-        let key = key.clone();
-        let url = client.url(&format!("issue/{key}?fields=summary,status,assignee"));
-        let http = client.http().clone();
-        let browse = client.browse_url(&key);
-        tasks.push(async move {
-            let resp = http.get(&url).send().await?;
-            if !resp.status().is_success() {
-                tracing::warn!("skipping {key}: status {}", resp.status());
-                return Ok::<Option<Ticket>, anyhow::Error>(None);
-            }
-            let parsed: IssueResponse = resp.json().await?;
-            Ok(Some(Ticket {
-                key: parsed.key,
-                summary: parsed.fields.summary,
-                status: parsed.fields.status.and_then(|s| s.name),
-                assignee: parsed.fields.assignee.and_then(|a| a.display_name),
-                url: browse,
-            }))
-        });
+#[derive(Debug, Deserialize)]
+struct SearchResponse {
+    #[serde(default)]
+    issues: Vec<IssueResponse>,
+}
+
+/// Fetch tickets that live in the **active sprint** of any of the given
+/// `projects`, filtered to tickets whose `status` is in `statuses` (when
+/// non-empty). Replaces the old commit-message scraping: it surfaces work
+/// the team is actually shipping this sprint, regardless of whether
+/// someone remembered to reference the ticket key in their commit.
+pub async fn fetch_active_sprint_tickets(
+    client: &JiraClient,
+    projects: &[String],
+    statuses: &[String],
+) -> Result<Vec<Ticket>> {
+    if projects.is_empty() {
+        return Ok(Vec::new());
     }
 
-    let mut out = Vec::new();
-    while let Some(res) = tasks.next().await {
-        if let Some(ticket) = res? {
-            out.push(ticket);
-        }
+    let mut clauses = vec![format!("project in ({})", join_quoted(projects))];
+    clauses.push("sprint in openSprints()".to_string());
+    if !statuses.is_empty() {
+        clauses.push(format!("status in ({})", join_quoted(statuses)));
     }
+    let jql = clauses.join(" AND ");
+
+    let url = client.url("search");
+    let resp = client
+        .http()
+        .get(&url)
+        .query(&[
+            ("jql", jql.as_str()),
+            ("fields", "summary,status,assignee"),
+            ("maxResults", "100"),
+        ])
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("JIRA search failed ({status}): {body}");
+    }
+    let parsed: SearchResponse = resp.json().await?;
+    let mut out: Vec<Ticket> = parsed
+        .issues
+        .into_iter()
+        .map(|i| Ticket {
+            url: client.browse_url(&i.key),
+            key: i.key,
+            summary: i.fields.summary,
+            status: i.fields.status.and_then(|s| s.name),
+            assignee: i.fields.assignee.and_then(|a| a.display_name),
+        })
+        .collect();
     out.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(out)
+}
+
+fn join_quoted(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|v| format!("\"{}\"", v.replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

@@ -66,6 +66,10 @@ pub enum Command {
     /// (useful after `aws-utils tui` exits)
     Session,
 
+    /// Print `unset` statements that clear AWS credentials from the
+    /// calling shell, and remove the on-disk session file
+    Logout,
+
     /// Print a shell-helper function so `eval`-pipelines aren't manual
     Init(InitArgs),
 

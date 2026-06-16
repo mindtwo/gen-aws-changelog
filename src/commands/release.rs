@@ -7,7 +7,7 @@ use crate::config::{Overrides, Resolved};
 use crate::error::Result;
 use crate::git;
 use crate::github::{compare::compare_commits, GithubClient};
-use crate::jira::{extract::extract_keys, fetch::fetch_tickets, JiraClient};
+use crate::jira::{fetch::fetch_active_sprint_tickets, JiraClient};
 use crate::ui::prompts;
 use chrono::Local;
 use colored::Colorize;
@@ -52,15 +52,12 @@ pub async fn run(args: ReleaseArgs) -> Result<()> {
         let commits = compare_commits(&gh, &to.revision_id, &from.revision_id).await?;
         let tickets = match JiraClient::from_env() {
             Ok(client) => {
-                let keys = extract_keys(
-                    commits.iter().map(|c| c.commit.message.as_str()),
+                fetch_active_sprint_tickets(
+                    &client,
                     &resolved.project.jira.prefixes,
-                );
-                if keys.is_empty() {
-                    Vec::new()
-                } else {
-                    fetch_tickets(&client, &keys).await?
-                }
+                    &resolved.project.jira.statuses,
+                )
+                .await?
             }
             Err(e) => {
                 eprintln!(

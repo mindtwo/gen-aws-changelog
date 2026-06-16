@@ -2,67 +2,50 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::BTreeSet;
 
+/// Matches JIRA-style keys (`PROJ-123`) case-insensitively, so a commit
+/// message like `fix learn-9: typo` matches the ticket `LEARN-9`. The
+/// project part must be at least 2 chars and start with a letter; the
+/// numeric suffix is mandatory.
 static GENERIC: Lazy<Regex> = Lazy::new(|| {
-    // Match standard JIRA keys: uppercase project key followed by `-NNN`.
-    Regex::new(r"\b([A-Z][A-Z0-9_]+)-(\d+)\b").expect("regex")
+    Regex::new(r"(?i)\b([a-z][a-z0-9_]+)-(\d+)\b").expect("regex")
 });
 
-/// Extract ticket keys (e.g. `LEARN-123`) from the given messages.
-/// If `prefixes` is non-empty, only keys whose project key is in the list
-/// are returned. Output is sorted and de-duplicated.
-pub fn extract_keys<'a, I: IntoIterator<Item = &'a str>>(
-    messages: I,
-    prefixes: &[String],
-) -> Vec<String> {
-    let allow: Option<BTreeSet<&str>> = if prefixes.is_empty() {
-        None
-    } else {
-        Some(prefixes.iter().map(|s| s.as_str()).collect())
-    };
+/// Returns the canonical ticket keys (uppercase, sorted, de-duplicated)
+/// referenced in `message`. Used by the changelog renderer to attach
+/// commits to JIRA tickets case-insensitively.
+pub fn keys_in(message: &str) -> Vec<String> {
     let mut out = BTreeSet::new();
-    for msg in messages {
-        for caps in GENERIC.captures_iter(msg) {
-            let prefix = &caps[1];
-            if let Some(allow) = &allow {
-                if !allow.contains(prefix) {
-                    continue;
-                }
-            }
-            out.insert(format!("{}-{}", prefix, &caps[2]));
-        }
+    for caps in GENERIC.captures_iter(message) {
+        out.insert(format!("{}-{}", caps[1].to_ascii_uppercase(), &caps[2]));
     }
     out.into_iter().collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::extract_keys;
+    use super::keys_in;
 
     #[test]
-    fn extracts_basic() {
-        let msgs = ["LEARN-123 fix bug", "Refactor LEARN-9 and APP-42"];
+    fn normalises_to_uppercase() {
+        assert_eq!(keys_in("learn-9 and APP-1"), vec!["APP-1", "LEARN-9"]);
+    }
+
+    #[test]
+    fn deduplicates_across_case() {
         assert_eq!(
-            extract_keys(msgs.iter().copied(), &[]),
-            vec!["APP-42", "LEARN-123", "LEARN-9"]
+            keys_in("learn-1 here, LEARN-1 again, Learn-1 once more"),
+            vec!["LEARN-1"]
         );
     }
 
     #[test]
-    fn filters_by_prefix() {
-        let msgs = ["LEARN-123 foo", "APP-1 bar"];
-        let out = extract_keys(msgs.iter().copied(), &["LEARN".to_string()]);
-        assert_eq!(out, vec!["LEARN-123"]);
+    fn ignores_single_letter_prefix() {
+        assert!(keys_in("a-1 foo").is_empty());
     }
 
     #[test]
-    fn deduplicates() {
-        let msgs = ["LEARN-1 here", "and LEARN-1 again"];
-        assert_eq!(extract_keys(msgs.iter().copied(), &[]), vec!["LEARN-1"]);
-    }
-
-    #[test]
-    fn ignores_lowercase_words() {
-        let msgs = ["nothing-here", "abc-1 should not match"];
-        assert!(extract_keys(msgs.iter().copied(), &[]).is_empty());
+    fn matches_inside_subject_and_body() {
+        let msg = "feat(api): learn-9 add foo\n\nRefs: APP-42";
+        assert_eq!(keys_in(msg), vec!["APP-42", "LEARN-9"]);
     }
 }

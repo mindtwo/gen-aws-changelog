@@ -6,6 +6,7 @@ pub mod changelog;
 pub mod check;
 pub mod config;
 pub mod init;
+pub mod logout;
 pub mod recipe;
 pub mod release;
 pub mod s3_check;

@@ -20,9 +20,16 @@ pub struct ProjectConfig {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct JiraConfig {
-    /// JIRA project key prefixes to match in commit messages (e.g. ["LEARN"])
+    /// JIRA project keys to query (e.g. ["LEARN", "APP"]). Tickets in the
+    /// active sprint of these projects are pulled when a changelog is
+    /// rendered. Also kept around for back-compat with older configs that
+    /// used `prefixes` to scope commit-message extraction.
     #[serde(default)]
     pub prefixes: Vec<String>,
+    /// Workflow statuses to include when fetching active-sprint tickets
+    /// (e.g. ["Ready for Release", "Done"]). Empty means "any status".
+    #[serde(default)]
+    pub statuses: Vec<String>,
 }
 
 /// Per-action account selection. All fields optional; `release` covers
@@ -71,7 +78,13 @@ impl ProjectConfig {
             region: Some(super::DEFAULT_REGION.to_string()),
             from_stage: "DeployPreProd".to_string(),
             to_stage: "DeployProd".to_string(),
-            jira: JiraConfig::default(),
+            jira: JiraConfig {
+                prefixes: Vec::new(),
+                statuses: vec![
+                    "Ready for Release".to_string(),
+                    "Done".to_string(),
+                ],
+            },
             aws: AwsAccounts::default(),
         }
     }

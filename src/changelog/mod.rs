@@ -1,8 +1,10 @@
 use crate::github::compare::Commit;
+use crate::jira::extract::keys_in;
 use crate::jira::fetch::Ticket;
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct ChangelogInput<'a> {
     pub project: &'a str,
@@ -45,11 +47,15 @@ struct ParsedCommit<'a> {
     breaking: bool,
     subject: String,
     original: &'a str,
+    /// Full commit message — used for ticket-key matching, since JIRA
+    /// references often live in the body, not the subject line.
+    full_message: &'a str,
 }
 
 fn parse_commit(c: &Commit) -> ParsedCommit<'_> {
     let first = c.first_line();
     let short_sha = c.short_sha();
+    let full = c.commit.message.as_str();
     if let Some(caps) = CONVENTIONAL.captures(first) {
         let kind = caps["type"].to_lowercase();
         let heading = GROUPS
@@ -64,6 +70,7 @@ fn parse_commit(c: &Commit) -> ParsedCommit<'_> {
             breaking: caps.name("bang").is_some(),
             subject: caps["subject"].to_string(),
             original: first,
+            full_message: full,
         }
     } else {
         ParsedCommit {
@@ -73,6 +80,7 @@ fn parse_commit(c: &Commit) -> ParsedCommit<'_> {
             breaking: false,
             subject: first.to_string(),
             original: first,
+            full_message: full,
         }
     }
 }
@@ -90,9 +98,31 @@ pub fn render(input: &ChangelogInput<'_>) -> String {
         short(input.from_sha),
     ));
 
+    // Build a lookup of ticket key → ticket so we can group commits under
+    // the JIRA tickets they reference (case-insensitive match in the
+    // commit message).
+    let ticket_keys: BTreeSet<String> = input.tickets.iter().map(|t| t.key.clone()).collect();
+    let parsed: Vec<ParsedCommit> = input.commits.iter().map(parse_commit).collect();
+
+    // ticket_key → indices into `parsed`
+    let mut commits_by_ticket: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut unassigned: Vec<usize> = Vec::new();
+    for (idx, p) in parsed.iter().enumerate() {
+        let mut matched = false;
+        for key in keys_in(p.full_message) {
+            if ticket_keys.contains(&key) {
+                commits_by_ticket.entry(key).or_default().push(idx);
+                matched = true;
+            }
+        }
+        if !matched {
+            unassigned.push(idx);
+        }
+    }
+
     out.push_str("## Tickets\n\n");
     if input.tickets.is_empty() {
-        out.push_str("_No JIRA tickets referenced in commit messages._\n\n");
+        out.push_str("_No JIRA tickets found in the active sprint._\n\n");
     } else {
         for t in input.tickets {
             let status = t.status.as_deref().unwrap_or("?");
@@ -101,21 +131,37 @@ pub fn render(input: &ChangelogInput<'_>) -> String {
                 "- [{}]({}) — {} _(status: {}, assignee: {})_\n",
                 t.key, t.url, t.summary, status, assignee
             ));
+            match commits_by_ticket.get(&t.key) {
+                Some(indices) => {
+                    for &i in indices {
+                        out.push_str(&format!("  {}\n", format_line(&parsed[i])));
+                    }
+                }
+                None => {
+                    out.push_str("  _no commits in this release reference this ticket_\n");
+                }
+            }
         }
         out.push('\n');
     }
 
-    out.push_str("## Commits\n\n");
-    if input.commits.is_empty() {
-        out.push_str("_No commits between stages._\n");
+    out.push_str("## Other commits\n\n");
+    if unassigned.is_empty() {
+        if input.commits.is_empty() {
+            out.push_str("_No commits between stages._\n");
+        } else {
+            out.push_str("_All commits are linked to a ticket above._\n");
+        }
         return out;
     }
 
-    // Group, preserving input order within each group.
-    let parsed: Vec<ParsedCommit> = input.commits.iter().map(parse_commit).collect();
+    // Group unassigned commits by conventional-commit heading.
     for (_key, heading) in GROUPS.iter().chain(std::iter::once(&("", MISC))) {
-        let group_commits: Vec<&ParsedCommit> =
-            parsed.iter().filter(|p| p.group == *heading).collect();
+        let group_commits: Vec<&ParsedCommit> = unassigned
+            .iter()
+            .map(|&i| &parsed[i])
+            .filter(|p| p.group == *heading)
+            .collect();
         if group_commits.is_empty() {
             continue;
         }
@@ -218,6 +264,66 @@ mod tests {
         // Miscellaneous keeps original line.
         assert!(r.contains("random commit without prefix"));
         assert!(r.contains("wip thing"));
+    }
+
+    fn ticket(key: &str, summary: &str) -> Ticket {
+        Ticket {
+            key: key.to_string(),
+            summary: summary.to_string(),
+            status: Some("Done".to_string()),
+            assignee: Some("Alice".to_string()),
+            url: format!("https://jira.example/browse/{key}"),
+        }
+    }
+
+    #[test]
+    fn groups_commits_under_tickets_case_insensitively() {
+        let commits = vec![
+            commit("aaaaaaa", "feat(api): learn-9 add foo"),
+            commit("bbbbbbb", "fix: handle null\n\nRefs: LEARN-9"),
+            commit("ccccccc", "chore: APP-1 bump deps"),
+            commit("ddddddd", "random commit with no ticket"),
+        ];
+        let tickets = vec![ticket("LEARN-9", "Add foo"), ticket("APP-1", "Bump deps")];
+        let r = render(&ChangelogInput {
+            project: "demo",
+            pipeline: "p",
+            from_stage: "a",
+            to_stage: "b",
+            from_sha: "0",
+            to_sha: "1",
+            commits: &commits,
+            tickets: &tickets,
+        });
+        // Tickets section lists both with their nested commits.
+        assert!(r.contains("[LEARN-9]"));
+        assert!(r.contains("[APP-1]"));
+        // Nested (indented) commits.
+        assert!(r.contains("  - `aaaaaaa`"));
+        assert!(r.contains("  - `bbbbbbb`"));
+        assert!(r.contains("  - `ccccccc`"));
+        // Untagged commit ends up under "Other commits".
+        let other = r.find("## Other commits").unwrap();
+        let no_ticket = r.find("random commit with no ticket").unwrap();
+        assert!(other < no_ticket);
+    }
+
+    #[test]
+    fn ticket_without_matching_commits_is_marked() {
+        let commits = vec![commit("aaaaaaa", "feat: unrelated change")];
+        let tickets = vec![ticket("LEARN-99", "Unreleased ticket")];
+        let r = render(&ChangelogInput {
+            project: "demo",
+            pipeline: "p",
+            from_stage: "a",
+            to_stage: "b",
+            from_sha: "0",
+            to_sha: "1",
+            commits: &commits,
+            tickets: &tickets,
+        });
+        assert!(r.contains("[LEARN-99]"));
+        assert!(r.contains("no commits in this release reference this ticket"));
     }
 
     #[test]

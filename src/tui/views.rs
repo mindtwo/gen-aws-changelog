@@ -94,7 +94,9 @@ fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     match state.tab {
         Tab::Projects => {
             spans.push(Span::styled("r", Style::default().fg(Color::Yellow)));
-            spans.push(Span::raw(": refresh AWS  "));
+            spans.push(Span::raw(": refresh  "));
+            spans.push(Span::styled("PgUp/PgDn", Style::default().fg(Color::Yellow)));
+            spans.push(Span::raw(": scroll  "));
         }
         Tab::Recipes => {
             spans.push(Span::styled("n", Style::default().fg(Color::Yellow)));
@@ -135,14 +137,131 @@ fn draw_projects(f: &mut Frame, area: Rect, state: &mut AppState) {
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, chunks[0], &mut state.projects_list);
 
-    let detail = match state.selected_project() {
-        Some(pv) => render_project_detail(pv),
-        None => vec![Line::from("No projects registered.")],
+    let Some(pv) = state.selected_project() else {
+        let para = Paragraph::new(vec![Line::from("No projects registered.")])
+            .block(Block::default().borders(Borders::ALL).title("Detail"));
+        f.render_widget(para, chunks[1]);
+        return;
     };
-    let para = Paragraph::new(detail)
+
+    // Split right pane: metadata on top, rendered changelog below.
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(meta_height(pv)), Constraint::Min(0)])
+        .split(chunks[1]);
+
+    let meta = Paragraph::new(render_project_detail(pv))
         .block(Block::default().borders(Borders::ALL).title("Detail"))
         .wrap(Wrap { trim: false });
-    f.render_widget(para, chunks[1]);
+    f.render_widget(meta, right[0]);
+
+    let (changelog_lines, title) = render_changelog_pane(pv);
+    let changelog = Paragraph::new(changelog_lines)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .wrap(Wrap { trim: false })
+        .scroll((pv.changelog_scroll, 0));
+    f.render_widget(changelog, right[1]);
+}
+
+fn meta_height(pv: &ProjectView) -> u16 {
+    // Conservative: enough to fit name/repo/path/pipeline/stages/region/jira
+    // + a few aws account lines + the "Stage state" label + 2-line status.
+    // Anything beyond that flows into the changelog pane, which scrolls.
+    let mut lines: u16 = 6; // header block (name, repo, path, blank)
+    if let Some(cfg) = &pv.config {
+        lines += 3; // pipeline + stages + region
+        if !cfg.jira.prefixes.is_empty() {
+            lines += 1;
+        }
+        if !cfg.jira.statuses.is_empty() {
+            lines += 1;
+        }
+        let aws = &cfg.aws;
+        if aws.default.is_some() || aws.release.is_some() || aws.s3.is_some() {
+            lines += 2; // blank + header
+            if aws.default.is_some() {
+                lines += 1;
+            }
+            if aws.release.is_some() {
+                lines += 1;
+            }
+            if aws.s3.is_some() {
+                lines += 1;
+            }
+        }
+        lines += 4; // blank + "Stage state" + 2 stage lines
+    } else if pv.config_error.is_some() {
+        lines += 1;
+    }
+    lines.saturating_add(2).clamp(8, 22) // + borders
+}
+
+fn render_changelog_pane(pv: &ProjectView) -> (Vec<Line<'_>>, String) {
+    match &pv.stage_state {
+        StageFetchState::Idle => (
+            vec![Line::from(Span::styled(
+                "press `r` to render the full changelog",
+                Style::default().fg(Color::DarkGray),
+            ))],
+            "Changelog".to_string(),
+        ),
+        StageFetchState::Loading => (
+            vec![Line::from(Span::styled(
+                "rendering changelog…",
+                Style::default().fg(Color::Yellow),
+            ))],
+            "Changelog".to_string(),
+        ),
+        StageFetchState::Failed(err) => (
+            vec![Line::from(Span::styled(
+                format!("stage fetch failed: {err}"),
+                Style::default().fg(Color::Red),
+            ))],
+            "Changelog".to_string(),
+        ),
+        StageFetchState::Ready(ready) => {
+            let mut lines: Vec<Line> = Vec::new();
+            if let Some(err) = &ready.changelog_error {
+                lines.push(Line::from(Span::styled(
+                    format!("changelog error: {err}"),
+                    Style::default().fg(Color::Red),
+                )));
+            }
+            if let Some(body) = &ready.changelog {
+                for raw in body.lines() {
+                    lines.push(style_markdown_line(raw));
+                }
+            } else if ready.changelog_error.is_none() {
+                lines.push(Line::from(Span::styled(
+                    "no changelog rendered",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            (lines, "Changelog (PgUp/PgDn to scroll)".to_string())
+        }
+    }
+}
+
+fn style_markdown_line(raw: &str) -> Line<'_> {
+    let trimmed = raw.trim_start();
+    let style = if trimmed.starts_with("# ") {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else if trimmed.starts_with("## ") {
+        Style::default()
+            .fg(Color::LightBlue)
+            .add_modifier(Modifier::BOLD)
+    } else if trimmed.starts_with("### ") {
+        Style::default()
+            .fg(Color::LightMagenta)
+            .add_modifier(Modifier::BOLD)
+    } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+        Style::default()
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    Line::from(Span::styled(raw.to_string(), style))
 }
 
 fn render_project_detail(pv: &ProjectView) -> Vec<Line<'_>> {
@@ -189,6 +308,15 @@ fn render_project_detail(pv: &ProjectView) -> Vec<Line<'_>> {
         lines.push(Line::from(vec![
             Span::styled("jira:     ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(cfg.jira.prefixes.join(", ")),
+        ]));
+    }
+    if !cfg.jira.statuses.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "statuses: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(cfg.jira.statuses.join(", ")),
         ]));
     }
     let aws = &cfg.aws;

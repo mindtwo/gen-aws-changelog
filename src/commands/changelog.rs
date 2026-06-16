@@ -6,7 +6,7 @@ use crate::config::project::AwsAction;
 use crate::config::{Overrides, Resolved};
 use crate::error::Result;
 use crate::github::{compare::compare_commits, GithubClient};
-use crate::jira::{extract::extract_keys, fetch::fetch_tickets, JiraClient};
+use crate::jira::{fetch::fetch_active_sprint_tickets, JiraClient};
 use colored::Colorize;
 
 pub async fn run(args: ChangelogArgs) -> Result<()> {
@@ -30,15 +30,12 @@ pub async fn run(args: ChangelogArgs) -> Result<()> {
 
     let tickets = match JiraClient::from_env() {
         Ok(client) => {
-            let keys = extract_keys(
-                commits.iter().map(|c| c.commit.message.as_str()),
+            fetch_active_sprint_tickets(
+                &client,
                 &resolved.project.jira.prefixes,
-            );
-            if keys.is_empty() {
-                Vec::new()
-            } else {
-                fetch_tickets(&client, &keys).await?
-            }
+                &resolved.project.jira.statuses,
+            )
+            .await?
         }
         Err(e) => {
             eprintln!(

@@ -1,7 +1,10 @@
 use crate::aws::codepipeline::{PipelineClient, StageRevision};
 use crate::aws::load_sdk_config;
+use crate::changelog::{render, ChangelogInput};
 use crate::config::project::AwsAction;
 use crate::config::{Account, ProjectConfig, RegistryEntry};
+use crate::github::{compare::compare_commits, GithubClient};
+use crate::jira::{fetch::fetch_active_sprint_tickets, JiraClient};
 use crate::recipe::Recipe;
 use ratatui::widgets::ListState;
 use std::path::Path;
@@ -40,6 +43,11 @@ pub enum StageFetchState {
 pub struct StageReady {
     pub from: StageRevision,
     pub to: StageRevision,
+    /// Pre-rendered markdown changelog (grouped commits + active-sprint
+    /// tickets). `None` when changelog generation failed but stage state
+    /// loaded — the error is surfaced in `changelog_error`.
+    pub changelog: Option<String>,
+    pub changelog_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -54,6 +62,9 @@ pub struct ProjectView {
     pub config: Option<ProjectConfig>,
     pub config_error: Option<String>,
     pub stage_state: StageFetchState,
+    /// Scroll offset (lines) into the rendered changelog detail pane. Reset
+    /// to 0 every time a new fetch completes.
+    pub changelog_scroll: u16,
 }
 
 impl ProjectView {
@@ -65,6 +76,7 @@ impl ProjectView {
             config,
             config_error,
             stage_state: StageFetchState::Idle,
+            changelog_scroll: 0,
         }
     }
 }
@@ -194,13 +206,13 @@ impl AppState {
     }
 
     /// Kick off a background fetch of CodePipeline state for the selected
-    /// project. Sends a [`StageFetchResult`] when done.
+    /// project, then render a full changelog (commits + active-sprint
+    /// tickets). Sends a [`StageFetchResult`] when done.
     pub fn start_stage_fetch(&mut self, tx: UnboundedSender<StageFetchResult>) {
         let Some(idx) = self.projects_list.selected() else {
             return;
         };
-        // Need cfg + region + stages + name; do not borrow self across the await.
-        let (name, pipeline, region, from_stage, to_stage, account) = {
+        let (name, repo, pipeline, region, from_stage, to_stage, account, jira_prefixes, jira_statuses) = {
             let pv = &self.projects[idx];
             let Some(cfg) = &pv.config else {
                 self.projects[idx].stage_state =
@@ -209,21 +221,44 @@ impl AppState {
             };
             (
                 pv.entry.name.clone(),
+                pv.entry.repo.clone(),
                 cfg.pipeline.clone(),
                 cfg.region.clone().unwrap_or_else(|| "eu-central-1".into()),
                 cfg.from_stage.clone(),
                 cfg.to_stage.clone(),
                 cfg.aws.account_for(AwsAction::Release).map(str::to_owned),
+                cfg.jira.prefixes.clone(),
+                cfg.jira.statuses.clone(),
             )
         };
 
         self.projects[idx].stage_state = StageFetchState::Loading;
+        self.projects[idx].changelog_scroll = 0;
 
         tokio::spawn(async move {
-            let result = fetch_stage_state(&pipeline, &region, &from_stage, &to_stage, &account)
-                .await
-                .map(|(from, to)| StageFetchState::Ready(Box::new(StageReady { from, to })))
-                .unwrap_or_else(|e| StageFetchState::Failed(format!("{e}")));
+            let result = match fetch_stage_state(&pipeline, &region, &from_stage, &to_stage, &account).await {
+                Ok((from, to)) => {
+                    let (changelog, changelog_error) = render_changelog_for_tui(
+                        &name,
+                        &repo,
+                        &pipeline,
+                        &from_stage,
+                        &to_stage,
+                        &from,
+                        &to,
+                        &jira_prefixes,
+                        &jira_statuses,
+                    )
+                    .await;
+                    StageFetchState::Ready(Box::new(StageReady {
+                        from,
+                        to,
+                        changelog,
+                        changelog_error,
+                    }))
+                }
+                Err(e) => StageFetchState::Failed(format!("{e}")),
+            };
             let _ = tx.send(StageFetchResult {
                 project_name: name,
                 state: result,
@@ -238,8 +273,57 @@ impl AppState {
             .find(|p| p.entry.name == result.project_name)
         {
             pv.stage_state = result.state;
+            pv.changelog_scroll = 0;
         }
     }
+
+    pub fn scroll_changelog(&mut self, delta: i32) {
+        let Some(idx) = self.projects_list.selected() else {
+            return;
+        };
+        let pv = &mut self.projects[idx];
+        let next = (pv.changelog_scroll as i32 + delta).max(0);
+        pv.changelog_scroll = next as u16;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn render_changelog_for_tui(
+    project_name: &str,
+    repo: &str,
+    pipeline: &str,
+    from_stage: &str,
+    to_stage: &str,
+    from: &StageRevision,
+    to: &StageRevision,
+    jira_prefixes: &[String],
+    jira_statuses: &[String],
+) -> (Option<String>, Option<String>) {
+    let gh = match GithubClient::new(repo) {
+        Ok(c) => c,
+        Err(e) => return (None, Some(format!("github: {e}"))),
+    };
+    let commits = match compare_commits(&gh, &to.revision_id, &from.revision_id).await {
+        Ok(c) => c,
+        Err(e) => return (None, Some(format!("github compare: {e}"))),
+    };
+    let tickets = match JiraClient::from_env() {
+        Ok(client) => fetch_active_sprint_tickets(&client, jira_prefixes, jira_statuses)
+            .await
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let body = render(&ChangelogInput {
+        project: project_name,
+        pipeline,
+        from_stage,
+        to_stage,
+        from_sha: &from.revision_id,
+        to_sha: &to.revision_id,
+        commits: &commits,
+        tickets: &tickets,
+    });
+    (Some(body), None)
 }
 
 async fn fetch_stage_state(

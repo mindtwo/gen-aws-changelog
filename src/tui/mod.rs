@@ -94,6 +94,7 @@ enum Action {
     AssumeSelected,
     NewRecipe,
     ClearStatus,
+    ScrollChangelog(i32),
 }
 
 async fn event_loop(
@@ -121,6 +122,7 @@ async fn event_loop(
         match handle_key(state, key.code) {
             Action::None => {}
             Action::ClearStatus => state.status = None,
+            Action::ScrollChangelog(delta) => state.scroll_changelog(delta),
             Action::StageFetch => state.start_stage_fetch(tx.clone()),
             Action::AssumeSelected => {
                 if let Some(account) = state.selected_account_name().map(str::to_owned) {
@@ -189,6 +191,8 @@ fn handle_key(state: &mut AppState, code: KeyCode) -> Action {
             Action::None
         }
         KeyCode::Char('c') if state.status.is_some() => Action::ClearStatus,
+        KeyCode::PageDown if matches!(state.tab, Tab::Projects) => Action::ScrollChangelog(5),
+        KeyCode::PageUp if matches!(state.tab, Tab::Projects) => Action::ScrollChangelog(-5),
         KeyCode::Char('r') if matches!(state.tab, Tab::Projects) => Action::StageFetch,
         KeyCode::Char('n') if matches!(state.tab, Tab::Recipes) => Action::NewRecipe,
         KeyCode::Char('l') if matches!(state.tab, Tab::Accounts) => Action::AssumeSelected,

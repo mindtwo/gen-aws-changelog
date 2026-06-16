@@ -62,6 +62,7 @@ async fn dispatch(args: Cli) -> error::Result<()> {
         Command::Accounts(c) => commands::accounts::run(c).await,
         Command::Assume(a) => commands::assume::run(a).await,
         Command::Session => commands::session::run().await,
+        Command::Logout => commands::logout::run().await,
         Command::Init(a) => commands::init::run(a).await,
         Command::Tui => commands::tui::run().await,
     }

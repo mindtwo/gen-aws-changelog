@@ -28,15 +28,36 @@ Requires Rust 1.80+.
 cargo install --git https://github.com/mindtwo/gen-aws-changelog --branch v2
 ```
 
-Or clone and build:
+### Local checkout + symlink
 
-```bash
-git clone https://github.com/mindtwo/gen-aws-changelog
-cd gen-aws-changelog
-git checkout v2
-cargo build --release
-# binary at target/release/aws-utils
-```
+For active development or if you want to track `v2` directly from a
+local working copy.
+
+1. **Check out and build** the release binary:
+
+   ```bash
+   git clone https://github.com/mindtwo/gen-aws-changelog
+   cd gen-aws-changelog
+   git checkout v2
+   cargo build --release
+   # binary lands at target/release/aws-utils
+   ```
+
+2. **Link the binary** into a directory on your `$PATH` so updates after
+   each `cargo build --release` are picked up automatically:
+
+   ```bash
+   ln -sf "$(pwd)/target/release/aws-utils" /usr/local/bin/aws-utils
+   # verify
+   aws-utils --version
+   ```
+
+   On systems where `/usr/local/bin` is not writable without sudo, link
+   into `~/.local/bin` (or any other `$PATH` entry) instead:
+
+   ```bash
+   ln -sf "$(pwd)/target/release/aws-utils" ~/.local/bin/aws-utils
+   ```
 
 ## Credentials
 
@@ -128,11 +149,25 @@ eval "$(aws-utils assume prod-app-teach)"
 ```
 
 Every successful assume (CLI, auto-assume, or TUI) also writes the
-session to `~/.cache/aws-utils/session.sh` (mode `0600`). You can
-re-load the last session into any shell with:
+session to `~/.cache/aws-utils/session.sh` (mode `0600`). The shell
+wrapper sources and immediately deletes this file after `awsu assume`
+or `awsu tui`, so credentials don't sit on disk longer than the
+hand-off needs. If you `aws-utils assume` directly (without the
+wrapper), you can re-load the file with:
 
 ```bash
 eval "$(aws-utils session)"     # or: . ~/.cache/aws-utils/session.sh
+```
+
+### Logging out
+
+`aws-utils logout` clears the assumed session: it prints `unset`
+statements for every credential variable and removes the on-disk
+session file.
+
+```bash
+awsu logout                     # via wrapper — env cleared in current shell
+eval "$(aws-utils logout)"      # manual equivalent
 ```
 
 All commands accept `--region`, `-v/--verbose`, `-q/--quiet`, and
@@ -150,7 +185,8 @@ from_stage = "DeployPreProd"
 to_stage = "DeployProd"
 
 [jira]
-prefixes = ["LEARN", "APP"]   # only extract these keys from commits
+prefixes = ["LEARN", "APP"]                       # JIRA project keys to query
+statuses = ["Ready for Release", "Done"]          # workflow stages to include
 ```
 
 The global registry (`~/.config/aws-utils/projects/<name>.toml` on
