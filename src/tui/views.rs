@@ -200,14 +200,14 @@ fn render_changelog_pane(pv: &ProjectView) -> (Vec<Line<'_>>, String) {
     match &pv.stage_state {
         StageFetchState::Idle => (
             vec![Line::from(Span::styled(
-                "press `r` to render the full changelog",
+                "press `r` to fetch commits",
                 Style::default().fg(Color::DarkGray),
             ))],
             "Changelog".to_string(),
         ),
         StageFetchState::Loading => (
             vec![Line::from(Span::styled(
-                "rendering changelog…",
+                "fetching commits…",
                 Style::default().fg(Color::Yellow),
             ))],
             "Changelog".to_string(),
@@ -221,47 +221,35 @@ fn render_changelog_pane(pv: &ProjectView) -> (Vec<Line<'_>>, String) {
         ),
         StageFetchState::Ready(ready) => {
             let mut lines: Vec<Line> = Vec::new();
-            if let Some(err) = &ready.changelog_error {
+            if let Some(err) = &ready.commits_error {
                 lines.push(Line::from(Span::styled(
-                    format!("changelog error: {err}"),
+                    format!("commit fetch error: {err}"),
                     Style::default().fg(Color::Red),
                 )));
-            }
-            if let Some(body) = &ready.changelog {
-                for raw in body.lines() {
-                    lines.push(style_markdown_line(raw));
-                }
-            } else if ready.changelog_error.is_none() {
+            } else if ready.commits.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    "no changelog rendered",
+                    "no commits between stages",
                     Style::default().fg(Color::DarkGray),
                 )));
+            } else {
+                for commit in &ready.commits {
+                    lines.push(Line::from(vec![
+                        Span::raw("- "),
+                        Span::styled(
+                            commit.short_sha(),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                        Span::raw(" "),
+                        Span::raw(commit.first_line().to_string()),
+                    ]));
+                }
             }
-            (lines, "Changelog (PgUp/PgDn to scroll)".to_string())
+            (
+                lines,
+                format!("Commits ({}) (PgUp/PgDn to scroll)", ready.commits.len()),
+            )
         }
     }
-}
-
-fn style_markdown_line(raw: &str) -> Line<'_> {
-    let trimmed = raw.trim_start();
-    let style = if trimmed.starts_with("# ") {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else if trimmed.starts_with("## ") {
-        Style::default()
-            .fg(Color::LightBlue)
-            .add_modifier(Modifier::BOLD)
-    } else if trimmed.starts_with("### ") {
-        Style::default()
-            .fg(Color::LightMagenta)
-            .add_modifier(Modifier::BOLD)
-    } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-        Style::default()
-    } else {
-        Style::default().fg(Color::Gray)
-    };
-    Line::from(Span::styled(raw.to_string(), style))
 }
 
 fn render_project_detail(pv: &ProjectView) -> Vec<Line<'_>> {

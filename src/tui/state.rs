@@ -1,10 +1,11 @@
 use crate::aws::codepipeline::{PipelineClient, StageRevision};
 use crate::aws::load_sdk_config;
-use crate::changelog::{render, ChangelogInput};
 use crate::config::project::AwsAction;
 use crate::config::{Account, ProjectConfig, RegistryEntry};
-use crate::github::{compare::compare_commits, GithubClient};
-use crate::jira::{fetch::fetch_active_sprint_tickets, JiraClient};
+use crate::github::{
+    compare::{compare_commits, Commit},
+    GithubClient,
+};
 use crate::recipe::Recipe;
 use ratatui::widgets::ListState;
 use std::path::Path;
@@ -43,11 +44,11 @@ pub enum StageFetchState {
 pub struct StageReady {
     pub from: StageRevision,
     pub to: StageRevision,
-    /// Pre-rendered markdown changelog (grouped commits + active-sprint
-    /// tickets). `None` when changelog generation failed but stage state
-    /// loaded — the error is surfaced in `changelog_error`.
-    pub changelog: Option<String>,
-    pub changelog_error: Option<String>,
+    /// Commits between the two stage revisions, newest first. Rendered as a
+    /// bullet list in the changelog pane. Empty when the stages are at the
+    /// same revision; a fetch failure is surfaced in `commits_error`.
+    pub commits: Vec<Commit>,
+    pub commits_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -206,13 +207,13 @@ impl AppState {
     }
 
     /// Kick off a background fetch of CodePipeline state for the selected
-    /// project, then render a full changelog (commits + active-sprint
-    /// tickets). Sends a [`StageFetchResult`] when done.
+    /// project, then fetch the commits between the two stage revisions.
+    /// Sends a [`StageFetchResult`] when done.
     pub fn start_stage_fetch(&mut self, tx: UnboundedSender<StageFetchResult>) {
         let Some(idx) = self.projects_list.selected() else {
             return;
         };
-        let (name, repo, pipeline, region, from_stage, to_stage, account, jira_prefixes, jira_statuses) = {
+        let (name, repo, pipeline, region, from_stage, to_stage, account) = {
             let pv = &self.projects[idx];
             let Some(cfg) = &pv.config else {
                 self.projects[idx].stage_state =
@@ -227,8 +228,6 @@ impl AppState {
                 cfg.from_stage.clone(),
                 cfg.to_stage.clone(),
                 cfg.aws.account_for(AwsAction::Release).map(str::to_owned),
-                cfg.jira.prefixes.clone(),
-                cfg.jira.statuses.clone(),
             )
         };
 
@@ -238,23 +237,12 @@ impl AppState {
         tokio::spawn(async move {
             let result = match fetch_stage_state(&pipeline, &region, &from_stage, &to_stage, &account).await {
                 Ok((from, to)) => {
-                    let (changelog, changelog_error) = render_changelog_for_tui(
-                        &name,
-                        &repo,
-                        &pipeline,
-                        &from_stage,
-                        &to_stage,
-                        &from,
-                        &to,
-                        &jira_prefixes,
-                        &jira_statuses,
-                    )
-                    .await;
+                    let (commits, commits_error) = fetch_commits_for_tui(&repo, &from, &to).await;
                     StageFetchState::Ready(Box::new(StageReady {
                         from,
                         to,
-                        changelog,
-                        changelog_error,
+                        commits,
+                        commits_error,
                     }))
                 }
                 Err(e) => StageFetchState::Failed(format!("{e}")),
@@ -287,43 +275,22 @@ impl AppState {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn render_changelog_for_tui(
-    project_name: &str,
+/// Fetch the commits between the `from` and `to` stage revisions for the
+/// changelog pane. Returns the commits (newest first) and, on failure, an
+/// error message to surface in the pane.
+async fn fetch_commits_for_tui(
     repo: &str,
-    pipeline: &str,
-    from_stage: &str,
-    to_stage: &str,
     from: &StageRevision,
     to: &StageRevision,
-    jira_prefixes: &[String],
-    jira_statuses: &[String],
-) -> (Option<String>, Option<String>) {
+) -> (Vec<Commit>, Option<String>) {
     let gh = match GithubClient::new(repo) {
         Ok(c) => c,
-        Err(e) => return (None, Some(format!("github: {e}"))),
+        Err(e) => return (Vec::new(), Some(format!("github: {e}"))),
     };
-    let commits = match compare_commits(&gh, &to.revision_id, &from.revision_id).await {
-        Ok(c) => c,
-        Err(e) => return (None, Some(format!("github compare: {e}"))),
-    };
-    let tickets = match JiraClient::from_env() {
-        Ok(client) => fetch_active_sprint_tickets(&client, jira_prefixes, jira_statuses)
-            .await
-            .unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-    let body = render(&ChangelogInput {
-        project: project_name,
-        pipeline,
-        from_stage,
-        to_stage,
-        from_sha: &from.revision_id,
-        to_sha: &to.revision_id,
-        commits: &commits,
-        tickets: &tickets,
-    });
-    (Some(body), None)
+    match compare_commits(&gh, &to.revision_id, &from.revision_id).await {
+        Ok(commits) => (commits, None),
+        Err(e) => (Vec::new(), Some(format!("github compare: {e}"))),
+    }
 }
 
 async fn fetch_stage_state(
